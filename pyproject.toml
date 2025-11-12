@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "antflow"
+version = "0.2.0"
+description = "AntFlow: Async execution library with concurrent.futures-style API and advanced pipelines"
+readme = "README.md"
+authors = [{name = "Rodolfo Nobrega", email = "rodolfo@example.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "tenacity>=8.0.0",
+    "taskgroup>=0.0.0a4; python_version < '3.11'",
+]
+keywords = ["antflow", "async", "asyncio", "pipeline", "concurrent", "futures", "executor", "worker-pool"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Framework :: AsyncIO",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-autorefs>=0.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rodolfonobrega/antflow"
+Documentation = "https://rodolfonobrega.github.io/antflow"
+Repository = "https://github.com/rodolfonobrega/antflow"
+Issues = "https://github.com/rodolfonobrega/antflow/issues"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["antflow*"]
+exclude = ["tests*", "docs*", "examples*", "site*"]

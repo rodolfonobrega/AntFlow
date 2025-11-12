@@ -1,0 +1,80 @@
+site_name: AntFlow Documentation
+site_description: AntFlow - Async execution library with concurrent.futures-style API and advanced pipelines
+site_url: https://rodolfonobrega.github.io/antflow
+repo_url: https://github.com/rodolfonobrega/antflow
+repo_name: rodolfonobrega/antflow
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [antflow]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            docstring_style: google
+            docstring_section_style: table
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - User Guide:
+      - AsyncExecutor: user-guide/executor.md
+      - Pipeline: user-guide/pipeline.md
+      - Error Handling: user-guide/error-handling.md
+  - API Reference:
+      - Overview: api/index.md
+      - Executor: api/executor.md
+      - Pipeline: api/pipeline.md
+      - Types: api/types.md
+      - Exceptions: api/exceptions.md
+      - Utilities: api/utils.md
+  - Examples:
+      - Basic Examples: examples/basic.md
+      - Advanced Examples: examples/advanced.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.details
+  - admonition
+  - toc:
+      permalink: true
