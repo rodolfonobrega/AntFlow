@@ -524,7 +524,7 @@ class Pipeline:
             self._worker_states[name].processing_since = start_time
 
             try:
-                logger.info(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt}")
+                logger.debug(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt}")
 
                 await self._emit_status(
                     item_id,
@@ -570,7 +570,7 @@ class Pipeline:
                         self._results.append({**payload})
 
                 self._items_processed += 1
-                logger.info(f"[{name}] END stage={stage.name} id={item_id}")
+                logger.debug(f"[{name}] END stage={stage.name} id={item_id}")
 
                 processing_time = time.time() - start_time
                 self._worker_metrics[name].items_processed += 1
@@ -700,7 +700,7 @@ class Pipeline:
             original_error = extract_exception(e)
 
             if attempt < stage.stage_attempts:
-                logger.warning(
+                logger.debug(
                     f"[{worker_name}] RETRY stage={stage.name} id={item_id} "
                     f"attempt={attempt} error={original_error}"
                 )
@@ -793,7 +793,7 @@ class Pipeline:
                 duration = time.time() - start_time
 
                 if current_attempt < stage.task_attempts:
-                    logger.warning(
+                    logger.debug(
                         f"[{worker_name}] RETRY task={task_name} id={item_id} "
                         f"attempt={current_attempt} error={e}"
                     )
