@@ -4,40 +4,54 @@ The `antflow.tracker` module provides real-time monitoring and event tracking fo
 
 ## Overview
 
-The **[StatusTracker][antflow.tracker.StatusTracker]** allows you to observe items as they move through the pipeline. It captures events like:
-
-- Item queued
-- Processing started
-- Task completion
-- Retries
-- Failures
-
-You can use it to build dashboards, progress bars, or simply to log the state of your processing.
+The **[StatusTracker][antflow.tracker.StatusTracker]** is the observability layer of AntFlow. It allows you to:
+1.  **Monitor Items**: Track the lifecycle of data items as they move through stages.
+2.  **Monitor Tasks**: Get granular events for every task execution (start, success, retry, failure).
+3.  **Build Dashboards**: Use the event stream to power real-time UIs.
 
 ## Usage Example
 
 ```python
 from antflow import Pipeline, Stage, StatusTracker
 
-# 1. Create a tracker
-tracker = StatusTracker()
+# 1. Define a custom handler
+async def on_event(event):
+    if event.status == "failed":
+        print(f"🚨 Alert: Item {event.item_id} failed in {event.stage}")
 
-# 2. Attach to pipeline
-pipeline = Pipeline(
-    stages=[...],
-    status_tracker=tracker
-)
+# 2. Initialize tracker
+tracker = StatusTracker(on_status_change=on_event)
 
-# 3. Run pipeline
+# 3. Attach to pipeline
+pipeline = Pipeline(stages=[...], status_tracker=tracker)
+
+# 4. Run
 await pipeline.run(items)
-
-# 4. Query status
-stats = tracker.get_stats()
-print(f"Completed: {stats['completed']}")
-
-# 5. Get history for a specific item
-history = tracker.get_history(item_id=123)
 ```
+
+## Event Reference
+
+### Item Status Events (`StatusEvent`)
+
+These events represent the high-level state of an item within a stage.
+
+| Status | Triggered When | Metadata |
+|--------|----------------|----------|
+| `queued` | Item enters a stage's input queue. | `{"attempt": int, "retry": bool}` (if retrying) |
+| `in_progress` | Worker picks up item and starts processing. | None |
+| `completed` | All tasks in the stage finished successfully. | None |
+| `failed` | Stage execution failed (after all retries). | `{"error": str}` |
+
+### Task Execution Events (`TaskEvent`)
+
+These events represent the execution of individual functions *within* a stage.
+
+| Event Type | Triggered When | Metadata/Attributes |
+|------------|----------------|---------------------|
+| `start` | A specific task function starts running. | `attempt` (int) |
+| `complete` | Task function returns successfully. | `duration` (float) |
+| `retry` | Task failed but has retries remaining. | `error` (Exception), `attempt` (int) |
+| `fail` | Task failed and has no retries left. | `error` (Exception) |
 
 ## Customizing Behavior
 

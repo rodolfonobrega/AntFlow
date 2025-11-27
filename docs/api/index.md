@@ -1,49 +1,19 @@
 # API Reference
 
-Complete API documentation for AntFlow, auto-generated from source code docstrings.
+Welcome to the AntFlow API Reference. This documentation provides detailed information about the classes, functions, and types available in the library.
 
-## Modules
+## Core Modules
 
-- [Executor](executor.md) - AsyncExecutor and AsyncFuture classes
-- [Pipeline](pipeline.md) - Pipeline and Stage classes
-- [StatusTracker](tracker.md) - Real-time monitoring
-- [Types](types.md) - Type definitions and protocols
-- [Exceptions](exceptions.md) - Exception hierarchy
-- [Utilities](utils.md) - Helper functions
+| Module | Description |
+|--------|-------------|
+| **[Pipeline](pipeline.md)** | The heart of AntFlow. Contains `Pipeline` and `Stage` classes for building multi-step workflows. |
+| **[StatusTracker](tracker.md)** | Observability layer. Contains `StatusTracker` and event definitions for real-time monitoring. |
+| **[AsyncExecutor](executor.md)** | Simple concurrent execution. Contains `AsyncExecutor` (like `concurrent.futures`) and `AsyncFuture`. |
 
-## Quick Links
+## Support Modules
 
-### Core Classes
-
-- **AsyncExecutor** - Concurrent.futures-style async executor
-- **AsyncFuture** - Future representing async task result
-- **Pipeline** - Multi-stage processing pipeline
-- **Stage** - Pipeline stage configuration
-- **StatusTracker** - Real-time pipeline monitoring
-
-### Type Definitions
-
-- **TaskFunc** - Async task callable type
-- **CallbackFunc** - Stage-level callback type
-- **TaskCallbackFunc** - Task-level callback type
-- **PipelineStats** - Pipeline metrics dataclass
-
-### Exceptions
-
-- **AntFlowError** - Base exception
-- **ExecutorShutdownError** - Executor shutdown errors
-- **PipelineError** - Pipeline-specific errors
-- **StageValidationError** - Stage configuration errors
-- **TaskFailedError** - Task failure wrapper
-
-## Usage
-
-Each module page provides detailed documentation including:
-
-- Class and function signatures
-- Parameter descriptions
-- Return values
-- Exception information
-- Usage examples
-
-Navigate using the sidebar or the links above.
+| Module | Description |
+|--------|-------------|
+| **[Types](types.md)** | Data structures and type definitions (`TaskEvent`, `WorkerMetrics`, etc.). |
+| **[Utils](utils.md)** | Helper functions for logging and error handling. |
+| **[Exceptions](exceptions.md)** | The exception hierarchy used throughout the library. |
