@@ -38,30 +38,7 @@ async def main():
     results = await pipeline.run(urls)
 ```
 
-## Configuration Reference
 
-### Stage Configuration
-
-When creating a `Stage`, you can configure its behavior extensively:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `name` | `str` | Required | Unique name for the stage. |
-| `workers` | `int` | Required | Number of concurrent workers for this stage. |
-| `tasks` | `List[Callable]` | Required | List of async functions to execute in order. |
-| `retry` | `str` | `"per_task"` | Retry strategy: `"per_task"` (retry individual functions) or `"per_stage"` (retry entire stage). |
-| `task_attempts` | `int` | `3` | Max attempts for a single task (used with `per_task`). |
-| `stage_attempts` | `int` | `3` | Max attempts for the whole stage (used with `per_stage`). |
-| `task_wait_seconds` | `float` | `1.0` | Wait time between retries. |
-| `unpack_args` | `bool` | `False` | If `True`, unpacks tuple/dict inputs as `*args` and `**kwargs` for the task function. |
-
-### Pipeline Configuration
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `stages` | `List[Stage]` | Required | Ordered list of stages. |
-| `collect_results` | `bool` | `True` | If `True`, accumulates results in memory. Set to `False` for streaming-only workflows to save memory. |
-| `status_tracker` | `StatusTracker` | `None` | Optional tracker for real-time monitoring. |
 
 ## Class Reference
 
