@@ -1,10 +1,18 @@
 # Exceptions API
 
-Custom exceptions raised by AntFlow.
+The `antflow.exceptions` module defines the custom exception hierarchy used by AntFlow.
 
 ## Overview
 
-The `antflow.exceptions` module defines the exception hierarchy. All AntFlow exceptions inherit from `AntFlowError`.
+All exceptions inherit from the base `AntFlowError`. This allows you to catch any AntFlow-related error with a single `except` block.
+
+## Exception Hierarchy
+
+- **`AntFlowError`**: Base class for all exceptions.
+    - **`ExecutorShutdownError`**: Raised when attempting to submit tasks to an `AsyncExecutor` that has already been shut down.
+    - **`PipelineError`**: Base class for pipeline-related errors.
+        - **`StageValidationError`**: Raised when a `Stage` is configured incorrectly (e.g., invalid worker count, unknown retry policy).
+    - **`TaskFailedError`**: Wraps an original exception when a task fails. Contains the `task_name` and the `original_exception`.
 
 ## Exception Reference
 
