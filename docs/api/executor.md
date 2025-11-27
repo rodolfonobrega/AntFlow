@@ -38,15 +38,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Wait Strategies
 
-When using `executor.wait()`, you can control when the function returns using the `return_when` parameter:
-
-| Strategy | Description |
-|----------|-------------|
-| `ALL_COMPLETED` | (Default) Returns only when **all** futures have finished. |
-| `FIRST_COMPLETED` | Returns as soon as **one** future finishes. Useful for racing tasks. |
-| `FIRST_EXCEPTION` | Returns as soon as **one** future raises an exception. Useful for fail-fast scenarios. |
 
 ## Class Reference
 

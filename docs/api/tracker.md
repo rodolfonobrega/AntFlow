@@ -29,29 +29,7 @@ pipeline = Pipeline(stages=[...], status_tracker=tracker)
 await pipeline.run(items)
 ```
 
-## Event Reference
 
-### Item Status Events (`StatusEvent`)
-
-These events represent the high-level state of an item within a stage.
-
-| Status | Triggered When | Metadata |
-|--------|----------------|----------|
-| `queued` | Item enters a stage's input queue. | `{"attempt": int, "retry": bool}` (if retrying) |
-| `in_progress` | Worker picks up item and starts processing. | None |
-| `completed` | All tasks in the stage finished successfully. | None |
-| `failed` | Stage execution failed (after all retries). | `{"error": str}` |
-
-### Task Execution Events (`TaskEvent`)
-
-These events represent the execution of individual functions *within* a stage.
-
-| Event Type | Triggered When | Metadata/Attributes |
-|------------|----------------|---------------------|
-| `start` | A specific task function starts running. | `attempt` (int) |
-| `complete` | Task function returns successfully. | `duration` (float) |
-| `retry` | Task failed but has retries remaining. | `error` (Exception), `attempt` (int) |
-| `fail` | Task failed and has no retries left. | `error` (Exception) |
 
 ## Customizing Behavior
 
