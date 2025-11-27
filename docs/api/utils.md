@@ -26,4 +26,8 @@ Helper to unwrap exceptions wrapped by `tenacity.RetryError`. When a task fails 
 
 ## Function Reference
 
-For the complete function signatures, see the [source code](../../antflow/utils.py).
+::: antflow.utils
+    options:
+      show_root_heading: false
+      show_source: false
+      members_order: source

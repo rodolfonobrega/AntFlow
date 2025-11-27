@@ -50,4 +50,18 @@ When using `executor.wait()`, you can control when the function returns using th
 
 ## Class Reference
 
-For complete class definitions, see the [source code](../../antflow/executor.py).
+### AsyncFuture
+
+::: antflow.executor.AsyncFuture
+    options:
+      show_root_heading: true
+      show_source: false
+      members_order: source
+
+### AsyncExecutor
+
+::: antflow.executor.AsyncExecutor
+    options:
+      show_root_heading: true
+      show_source: false
+      members_order: source

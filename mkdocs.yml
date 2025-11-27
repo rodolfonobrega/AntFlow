@@ -60,6 +60,7 @@ nav:
       - Overview: api/index.md
       - Executor: api/executor.md
       - Pipeline: api/pipeline.md
+      - StatusTracker: api/tracker.md
       - Types: api/types.md
       - Exceptions: api/exceptions.md
       - Utilities: api/utils.md

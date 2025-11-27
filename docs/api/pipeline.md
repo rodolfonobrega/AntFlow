@@ -65,4 +65,18 @@ When creating a `Stage`, you can configure its behavior extensively:
 
 ## Class Reference
 
-For complete class definitions, see the [source code](../../antflow/pipeline.py).
+### Stage
+
+::: antflow.pipeline.Stage
+    options:
+      show_root_heading: true
+      show_source: false
+      members_order: source
+
+### Pipeline
+
+::: antflow.pipeline.Pipeline
+    options:
+      show_root_heading: true
+      show_source: false
+      members_order: source
