@@ -50,8 +50,4 @@ Aggregated statistics for the entire pipeline.
 
 ## Type Reference
 
-::: antflow.types
-    options:
-      show_root_heading: false
-      show_source: false
-      members_order: source
+For the complete type definitions, see the [source code](../../antflow/types.py).

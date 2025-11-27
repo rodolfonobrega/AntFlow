@@ -16,8 +16,4 @@ All exceptions inherit from the base `AntFlowError`. This allows you to catch an
 
 ## Exception Reference
 
-::: antflow.exceptions
-    options:
-      show_root_heading: false
-      show_source: false
-      members_order: source
+For the complete exception definitions, see the [source code](../../antflow/exceptions.py).
