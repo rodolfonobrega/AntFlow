@@ -1,30 +1,46 @@
-# Pipeline Module
+# Pipeline API
 
-The pipeline module provides multi-stage async processing with configurable retry strategies and callbacks.
+The `antflow.pipeline` module provides the core functionality for building and running multi-stage asynchronous workflows.
 
 ## Overview
 
-A `Pipeline` consists of multiple `Stage`s. Each stage has its own worker pool and processes items independently.
-Items flow from one stage to the next automatically.
+A **Pipeline** consists of a sequence of **Stages**. Each stage has its own pool of workers and processes items independently. Data flows from one stage to the next automatically.
 
-### Key Features
+Key components:
 
-- **Worker Pools**: Each stage has a dedicated number of workers.
-- **Retry Logic**: Configurable retry attempts per task or per stage.
-- **Argument Unpacking**: Support for unpacking tuple/dict arguments into task function parameters.
-- **Monitoring**: Integration with `StatusTracker` for real-time visibility.
+- **[Pipeline][antflow.pipeline.Pipeline]**: The main orchestrator that manages stages and data flow.
+- **[Stage][antflow.pipeline.Stage]**: Configuration for a single processing step, including worker count and retry logic.
 
-## Stage
+## Usage Example
 
-The `Stage` class defines a processing step in the pipeline.
+```python
+import asyncio
+from antflow import Pipeline, Stage
 
-### Configuration
+async def fetch_data(url):
+    # ... fetch logic ...
+    return data
 
-- `name`: Unique name for the stage.
-- `workers`: Number of concurrent workers.
-- `tasks`: List of async functions to execute in order.
-- `retry`: Retry strategy ("per_task" or "per_stage").
-- `unpack_args`: If `True`, unpacks input items (tuples/dicts) as arguments for the task function.
+async def process_data(data):
+    # ... process logic ...
+    return result
+
+async def main():
+    # Define stages
+    stage1 = Stage(name="Fetch", workers=5, tasks=[fetch_data])
+    stage2 = Stage(name="Process", workers=2, tasks=[process_data])
+
+    # Create pipeline
+    pipeline = Pipeline(stages=[stage1, stage2])
+
+    # Run
+    urls = ["http://example.com/1", "http://example.com/2"]
+    results = await pipeline.run(urls)
+```
+
+## Class Reference
+
+### Stage
 
 ::: antflow.pipeline.Stage
     options:
@@ -32,9 +48,7 @@ The `Stage` class defines a processing step in the pipeline.
       show_source: false
       members_order: source
 
-## Pipeline
-
-The `Pipeline` class orchestrates the execution of stages.
+### Pipeline
 
 ::: antflow.pipeline.Pipeline
     options:

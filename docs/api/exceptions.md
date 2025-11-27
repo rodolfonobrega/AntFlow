@@ -1,6 +1,12 @@
-# Exceptions Module
+# Exceptions API
 
-Exception hierarchy for AntFlow error handling.
+Custom exceptions raised by AntFlow.
+
+## Overview
+
+The `antflow.exceptions` module defines the exception hierarchy. All AntFlow exceptions inherit from `AntFlowError`.
+
+## Exception Reference
 
 ::: antflow.exceptions
     options:
