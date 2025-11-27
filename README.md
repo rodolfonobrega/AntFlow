@@ -34,12 +34,12 @@ With hundreds of batches to process, these delays accumulated into **hours of wa
 
 I built AntFlow to solve this exact problem. Instead of batch-by-batch processing, AntFlow uses worker pools where:
 
-- Ô£à Each worker handles tasks independently
-- Ô£à When a worker finishes, it immediately grabs the next task
-- Ô£à Slow tasks don't block fast ones
-- Ô£à Always maintain optimal concurrency (e.g., 10 tasks running simultaneously)
-- Ô£à Built-in retry logic for failed tasks
-- Ô£à Multi-stage pipelines for complex workflows
+- ✅ Each worker handles tasks independently
+- ✅ When a worker finishes, it immediately grabs the next task
+- ✅ Slow tasks don't block fast ones
+- ✅ Always maintain optimal concurrency (e.g., 10 tasks running simultaneously)
+- ✅ Built-in retry logic for failed tasks
+- ✅ Multi-stage pipelines for complex workflows
 
 **Result:** My OpenAI batch processing went from taking hours to completing in a fraction of the time, with automatic retry handling and zero idle time.
 
@@ -55,22 +55,22 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 
 ## Key Features
 
-### ­ƒÜÇ **Worker Pool Architecture**
+### 🚀 **Worker Pool Architecture**
 - Independent workers that never block each other
 - Automatic task distribution
 - Optimal resource utilization
 
-### ­ƒöä **Multi-Stage Pipelines**
+### 🔄 **Multi-Stage Pipelines**
 - Chain operations with configurable worker pools per stage
 - Each stage runs independently
 - Data flows automatically between stages
 
-### ­ƒÆ¬ **Built-in Resilience**
+### 💪 **Built-in Resilience**
 - Per-task retry with exponential backoff
 - Per-stage retry for transactional operations
 - Failed tasks don't stop the pipeline
 
-### ­ƒôè **Real-time Monitoring & Dashboards**
+### 📊 **Real-time Monitoring & Dashboards**
 - **Worker State Tracking** - Know what each worker is doing in real-time
 - **Performance Metrics** - Track items processed, failures, avg time per worker
 - **Task-Level Events** - Monitor individual task retries and failures
@@ -79,7 +79,7 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 - **StatusTracker** - Real-time item tracking with full history
 - **PipelineDashboard** - Helper for combining queries and events
 
-### ­ƒÄ» **Familiar API**
+### 🎯 **Familiar API**
 - Drop-in async replacement for `concurrent.futures`
 - `submit()`, `map()`, `as_completed()` methods
 - Clean, intuitive interface
@@ -88,14 +88,14 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 
 ## Use Cases
 
-### Ô£à **Perfect for:**
+### ✅ **Perfect for:**
 - **Batch API Processing** - OpenAI, Anthropic, any batch API
 - **ETL Pipelines** - Extract, transform, load at scale
 - **Web Scraping** - Fetch, parse, store web data efficiently
 - **Data Processing** - Process large datasets with retry logic
 - **Microservices** - Chain async service calls with error handling
 
-### ÔÜí **Real-world Impact:**
+### ⚡ **Real-world Impact:**
 - Process large batches without bottlenecks
 - Automatic retry for transient failures
 - Zero idle time = maximum throughput
@@ -265,22 +265,22 @@ See the [examples/](examples/) directory for more advanced usage, including a **
 
 AntFlow has comprehensive documentation to help you get started and master advanced features:
 
-### ­ƒôÜ Getting Started
+### 🚀 Getting Started
 - [Quick Start Guide](docs/getting-started/quickstart.md) - Get up and running in minutes
 - [Installation Guide](docs/getting-started/installation.md) - Installation instructions
 
-### ­ƒøá´©Å User Guides
+### 📚 User Guides
 - [AsyncExecutor Guide](docs/user-guide/executor.md) - Using the concurrent.futures-style API
 - [Pipeline Guide](docs/user-guide/pipeline.md) - Building multi-stage workflows
 - [Dashboard Guide](docs/user-guide/dashboard.md) - Real-time monitoring and dashboards
 - [Error Handling](docs/user-guide/error-handling.md) - Managing failures and retries
 - [Worker Tracking](docs/user-guide/worker-tracking.md) - Monitoring individual workers
 
-### ­ƒÆí Examples
+### 💡 Examples
 - [Basic Examples](docs/examples/basic.md) - Simple use cases to get started
 - [Advanced Examples](docs/examples/advanced.md) - Complex workflows and patterns
 
-### ­ƒôû API Reference
+### 📖 API Reference
 - [API Index](docs/api/index.md) - Complete API documentation
 - [AsyncExecutor](docs/api/executor.md) - Executor API reference
 - [Pipeline](docs/api/pipeline.md) - Pipeline API reference
@@ -336,5 +336,5 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 <p align="center">
-  Made with ÔØñ´©Å to solve real problems in production
+  Made with ❤️ to solve real problems in production
 </p>
