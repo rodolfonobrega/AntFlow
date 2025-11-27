@@ -39,6 +39,39 @@ print(f"Completed: {stats['completed']}")
 history = tracker.get_history(item_id=123)
 ```
 
+## Customizing Behavior
+
+You can customize how status changes are handled by providing callbacks or subclassing `StatusTracker`.
+
+### Using Callbacks
+
+The easiest way to react to events is by passing async callbacks during initialization:
+
+```python
+async def on_fail(event: TaskEvent):
+    # Send alert to Slack/Discord
+    await send_alert(f"Item {event.item_id} failed: {event.error}")
+
+tracker = StatusTracker(
+    on_task_fail=on_fail,
+    on_status_change=lambda e: print(f"Status: {e.status}")
+)
+```
+
+### Accessing Worker & Job Status
+
+The `StatusTracker` focuses on **Item** progress. To monitor **Workers**, use the `Pipeline` methods:
+
+```python
+# Item Status (via Tracker)
+item_status = tracker.get_status(item_id=123)
+
+# Worker Status (via Pipeline)
+worker_states = pipeline.get_worker_states()
+for name, state in worker_states.items():
+    print(f"Worker {name}: {state.status}")
+```
+
 ## Class Reference
 
 ### StatusEvent
