@@ -38,6 +38,7 @@ class Stage:
     task_attempts: int = 3
     task_wait_seconds: float = 1.0
     stage_attempts: int = 3
+    unpack_args: bool = False
 
     def validate(self) -> None:
         """
@@ -636,7 +637,15 @@ class Pipeline:
             )
 
             try:
-                current = await wrapped(current)
+                if stage.unpack_args:
+                    if isinstance(current, dict):
+                        current = await wrapped(**current)
+                    elif isinstance(current, (list, tuple)):
+                        current = await wrapped(*current)
+                    else:
+                        current = await wrapped(current)
+                else:
+                    current = await wrapped(current)
 
                 logger.debug(
                     f"[{worker_name}] END task {idx+1}/{len(stage.tasks)}={task_name} id={item_id}"
@@ -688,7 +697,15 @@ class Pipeline:
                     f"{task_name} id={item_id}"
                 )
 
-                current = await task(current)
+                if stage.unpack_args:
+                    if isinstance(current, dict):
+                        current = await task(**current)
+                    elif isinstance(current, (list, tuple)):
+                        current = await task(*current)
+                    else:
+                        current = await task(current)
+                else:
+                    current = await task(current)
 
                 logger.debug(
                     f"[{worker_name}] END task {idx+1}/{len(stage.tasks)}={task_name} id={item_id}"
@@ -759,7 +776,7 @@ class Pipeline:
             stop=stop_after_attempt(stage.task_attempts),
             wait=wait_fixed(stage.task_wait_seconds)
         )
-        async def wrapped(x: Any) -> Any:
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
             attempt_counter["count"] += 1
             current_attempt = attempt_counter["count"]
             start_time = time.time()
@@ -774,7 +791,7 @@ class Pipeline:
             )
 
             try:
-                result = await task(x)
+                result = await task(*args, **kwargs)
                 duration = time.time() - start_time
 
                 await self._emit_task_event(
