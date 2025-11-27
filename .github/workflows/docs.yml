@@ -25,4 +25,7 @@ jobs:
           pip install "mkdocstrings[python]"
       
       - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          mkdocs gh-deploy --force
