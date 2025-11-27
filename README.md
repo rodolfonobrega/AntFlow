@@ -276,6 +276,7 @@ AntFlow has comprehensive documentation to help you get started and master advan
 - [Worker Tracking](https://rodolfonobrega.github.io/antflow/user-guide/worker-tracking/) - Monitoring individual workers
 
 ### 💡 Examples
+- [Examples Index](https://rodolfonobrega.github.io/antflow/examples/) - **Start Here**: List of all 11+ example scripts
 - [Basic Examples](https://rodolfonobrega.github.io/antflow/examples/basic/) - Simple use cases to get started
 - [Advanced Examples](https://rodolfonobrega.github.io/antflow/examples/advanced/) - Complex workflows and patterns
 
