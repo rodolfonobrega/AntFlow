@@ -88,18 +88,4 @@ for name, state in worker_states.items():
 
 ## Class Reference
 
-### StatusEvent
-
-::: antflow.tracker.StatusEvent
-    options:
-      show_root_heading: true
-      show_source: false
-      members_order: source
-
-### StatusTracker
-
-::: antflow.tracker.StatusTracker
-    options:
-      show_root_heading: true
-      show_source: false
-      members_order: source
+For complete class definitions, see the [source code](../../antflow/tracker.py).
