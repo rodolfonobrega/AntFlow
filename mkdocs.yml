@@ -67,8 +67,9 @@ nav:
       - Exceptions: api/exceptions.md
       - Utilities: api/utils.md
   - Examples:
-      - Basic Examples: examples/basic.md
-      - Advanced Examples: examples/advanced.md
+      - Index: examples/index.md
+      - Basic: examples/basic.md
+      - Advanced: examples/advanced.md
   - Contributing: contributing.md
 
 markdown_extensions:
