@@ -6,6 +6,7 @@ Complete API documentation for AntFlow, auto-generated from source code docstrin
 
 - [Executor](executor.md) - AsyncExecutor and AsyncFuture classes
 - [Pipeline](pipeline.md) - Pipeline and Stage classes
+- [StatusTracker](tracker.md) - Real-time monitoring
 - [Types](types.md) - Type definitions and protocols
 - [Exceptions](exceptions.md) - Exception hierarchy
 - [Utilities](utils.md) - Helper functions
@@ -18,6 +19,7 @@ Complete API documentation for AntFlow, auto-generated from source code docstrin
 - **AsyncFuture** - Future representing async task result
 - **Pipeline** - Multi-stage processing pipeline
 - **Stage** - Pipeline stage configuration
+- **StatusTracker** - Real-time pipeline monitoring
 
 ### Type Definitions
 

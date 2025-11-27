@@ -194,17 +194,17 @@ async def test_wait_racing_tasks():
     call_order = []
 
     async def task_a():
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
         call_order.append('A')
         return 'A'
 
     async def task_b():
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.15)
         call_order.append('B')
         return 'B'
 
     async def task_c():
-        await asyncio.sleep(0.03)
+        await asyncio.sleep(0.25)
         call_order.append('C')
         return 'C'
 
