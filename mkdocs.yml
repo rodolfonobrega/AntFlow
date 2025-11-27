@@ -55,6 +55,8 @@ nav:
   - User Guide:
       - AsyncExecutor: user-guide/executor.md
       - Pipeline: user-guide/pipeline.md
+      - Dashboard: user-guide/dashboard.md
+      - Worker Tracking: user-guide/worker-tracking.md
       - Error Handling: user-guide/error-handling.md
   - API Reference:
       - Overview: api/index.md
