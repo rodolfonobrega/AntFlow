@@ -34,12 +34,12 @@ With hundreds of batches to process, these delays accumulated into **hours of wa
 
 I built AntFlow to solve this exact problem. Instead of batch-by-batch processing, AntFlow uses worker pools where:
 
-- ✅ Each worker handles tasks independently
-- ✅ When a worker finishes, it immediately grabs the next task
-- ✅ Slow tasks don't block fast ones
-- ✅ Always maintain optimal concurrency (e.g., 10 tasks running simultaneously)
-- ✅ Built-in retry logic for failed tasks
-- ✅ Multi-stage pipelines for complex workflows
+- Ô£à Each worker handles tasks independently
+- Ô£à When a worker finishes, it immediately grabs the next task
+- Ô£à Slow tasks don't block fast ones
+- Ô£à Always maintain optimal concurrency (e.g., 10 tasks running simultaneously)
+- Ô£à Built-in retry logic for failed tasks
+- Ô£à Multi-stage pipelines for complex workflows
 
 **Result:** My OpenAI batch processing went from taking hours to completing in a fraction of the time, with automatic retry handling and zero idle time.
 
@@ -55,22 +55,22 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 
 ## Key Features
 
-### 🚀 **Worker Pool Architecture**
+### ­ƒÜÇ **Worker Pool Architecture**
 - Independent workers that never block each other
 - Automatic task distribution
 - Optimal resource utilization
 
-### 🔄 **Multi-Stage Pipelines**
+### ­ƒöä **Multi-Stage Pipelines**
 - Chain operations with configurable worker pools per stage
 - Each stage runs independently
 - Data flows automatically between stages
 
-### 💪 **Built-in Resilience**
+### ­ƒÆ¬ **Built-in Resilience**
 - Per-task retry with exponential backoff
 - Per-stage retry for transactional operations
 - Failed tasks don't stop the pipeline
 
-### 📊 **Real-time Monitoring & Dashboards**
+### ­ƒôè **Real-time Monitoring & Dashboards**
 - **Worker State Tracking** - Know what each worker is doing in real-time
 - **Performance Metrics** - Track items processed, failures, avg time per worker
 - **Task-Level Events** - Monitor individual task retries and failures
@@ -79,7 +79,7 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 - **StatusTracker** - Real-time item tracking with full history
 - **PipelineDashboard** - Helper for combining queries and events
 
-### 🎯 **Familiar API**
+### ­ƒÄ» **Familiar API**
 - Drop-in async replacement for `concurrent.futures`
 - `submit()`, `map()`, `as_completed()` methods
 - Clean, intuitive interface
@@ -88,14 +88,14 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 
 ## Use Cases
 
-### ✅ **Perfect for:**
+### Ô£à **Perfect for:**
 - **Batch API Processing** - OpenAI, Anthropic, any batch API
 - **ETL Pipelines** - Extract, transform, load at scale
 - **Web Scraping** - Fetch, parse, store web data efficiently
 - **Data Processing** - Process large datasets with retry logic
 - **Microservices** - Chain async service calls with error handling
 
-### ⚡ **Real-world Impact:**
+### ÔÜí **Real-world Impact:**
 - Process large batches without bottlenecks
 - Automatic retry for transient failures
 - Zero idle time = maximum throughput
@@ -136,6 +136,155 @@ async def save_to_db(processed_data):
 
 # Build the pipeline
 upload_stage = Stage(name="Upload", workers=10, tasks=[upload_batch])
+check_stage = Stage(name="Check", workers=10, tasks=[check_status])
+download_stage = Stage(name="Download", workers=10, tasks=[download_results])
+save_stage = Stage(name="Save", workers=5, tasks=[save_to_db])
+
+pipeline = Pipeline(stages=[upload_stage, check_stage, download_stage, save_stage])
+
+# Process batches efficiently
+batches = ["batch1", "batch2", "batch3"]
+results = await pipeline.run(batches)
+```
+
+**What happens**: Each stage has its own worker pool (10 for Upload, 10 for Check, 10 for Download, 5 for Save). Workers in each stage process tasks independently. As soon as a worker finishes, it picks the next task. No waiting. No idle time. Maximum throughput.
+
+---
+
+## Core Concepts
+
+### AsyncExecutor: Simple Concurrent Execution
+
+For straightforward parallel processing, AsyncExecutor provides a `concurrent.futures`-style API:
+
+```python
+import asyncio
+from antflow import AsyncExecutor
+
+async def process_item(x):
+    await asyncio.sleep(0.1)
+    return x * 2
+
+async def main():
+    async with AsyncExecutor(max_workers=10) as executor:
+        # Using map() for parallel processing
+        results = []
+        async for result in executor.map(process_item, range(100)):
+            results.append(result)
+        print(f"Processed {len(results)} items")
+
+asyncio.run(main())
+```
+
+### Pipeline: Multi-Stage Processing
+
+For complex workflows with multiple steps, you can build a `Pipeline`:
+
+```python
+import asyncio
+from antflow import Pipeline, Stage
+
+async def fetch(x):
+    await asyncio.sleep(0.1)
+    return f"data_{x}"
+
+async def process(x):
+    await asyncio.sleep(0.1)
+    return x.upper()
+
+async def save(x):
+    await asyncio.sleep(0.1)
+    return f"saved_{x}"
+
+async def main():
+    # Define stages with different worker counts
+    fetch_stage = Stage(name="Fetch", workers=10, tasks=[fetch])
+    process_stage = Stage(name="Process", workers=5, tasks=[process])
+    save_stage = Stage(name="Save", workers=3, tasks=[save])
+
+    # Build pipeline
+    pipeline = Pipeline(stages=[fetch_stage, process_stage, save_stage])
+
+    # Process 100 items through all stages
+    results = await pipeline.run(range(100))
+
+    print(f"Completed: {len(results)} items")
+    print(f"Stats: {pipeline.get_stats()}")
+
+asyncio.run(main())
+```
+
+**Why different worker counts?**
+- **Fetch**: I/O bound, use more workers (10)
+- **Process**: CPU bound, moderate workers (5)
+- **Save**: Rate-limited API, fewer workers (3)
+
+---
+
+## Real-Time Monitoring with StatusTracker
+
+Track every item as it flows through your pipeline with **StatusTracker**. Get real-time status updates, query current states, and access complete event history.
+
+```python
+from antflow import Pipeline, Stage, StatusTracker
+
+tracker = StatusTracker()
+
+# Define stages
+stage1 = Stage(name="Fetch", workers=5, tasks=[fetch])
+stage2 = Stage(name="Process", workers=3, tasks=[process])
+stage3 = Stage(name="Save", workers=5, tasks=[save])
+
+pipeline = Pipeline(
+    stages=[stage1, stage2, stage3],
+    status_tracker=tracker
+)
+
+results = await pipeline.run(items)
+
+# Query current status
+stats = tracker.get_stats()
+print(f"Completed: {stats['completed']}")
+print(f"Failed: {stats['failed']}")
+
+# Get specific item status
+status = tracker.get_status(item_id=42)
+print(f"Item 42: {status.status} @ {status.stage}")
+
+# Get all failed items
+failed = tracker.get_by_status("failed")
+for event in failed:
+    print(f"Item {event.item_id}: {event.metadata['error']}")
+```
+
+See the [examples/](examples/) directory for more advanced usage, including a **Rich Dashboard** example (`examples/rich_dashboard.py`).
+
+---
+
+## Documentation
+
+AntFlow has comprehensive documentation to help you get started and master advanced features:
+
+### ­ƒôÜ Getting Started
+- [Quick Start Guide](docs/getting-started/quickstart.md) - Get up and running in minutes
+- [Installation Guide](docs/getting-started/installation.md) - Installation instructions
+
+### ­ƒøá´©Å User Guides
+- [AsyncExecutor Guide](docs/user-guide/executor.md) - Using the concurrent.futures-style API
+- [Pipeline Guide](docs/user-guide/pipeline.md) - Building multi-stage workflows
+- [Dashboard Guide](docs/user-guide/dashboard.md) - Real-time monitoring and dashboards
+- [Error Handling](docs/user-guide/error-handling.md) - Managing failures and retries
+- [Worker Tracking](docs/user-guide/worker-tracking.md) - Monitoring individual workers
+
+### ­ƒÆí Examples
+- [Basic Examples](docs/examples/basic.md) - Simple use cases to get started
+- [Advanced Examples](docs/examples/advanced.md) - Complex workflows and patterns
+
+### ­ƒôû API Reference
+- [API Index](docs/api/index.md) - Complete API documentation
+- [AsyncExecutor](docs/api/executor.md) - Executor API reference
+- [Pipeline](docs/api/pipeline.md) - Pipeline API reference
+- [Exceptions](docs/api/exceptions.md) - Exception types
 - [Types](docs/api/types.md) - Type definitions
 - [Utils](docs/api/utils.md) - Utility functions
 
@@ -187,5 +336,5 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 <p align="center">
-  Made with ❤️ to solve real problems in production
+  Made with ÔØñ´©Å to solve real problems in production
 </p>
