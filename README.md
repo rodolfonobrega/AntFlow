@@ -283,6 +283,7 @@ AntFlow has comprehensive documentation to help you get started and master advan
 - [API Index](docs/api/index.md) - Complete API documentation
 - [AsyncExecutor](docs/api/executor.md) - Executor API reference
 - [Pipeline](docs/api/pipeline.md) - Pipeline API reference
+- [StatusTracker](docs/api/tracker.md) - Status tracking and monitoring
 - [Exceptions](docs/api/exceptions.md) - Exception types
 - [Types](docs/api/types.md) - Type definitions
 - [Utils](docs/api/utils.md) - Utility functions
