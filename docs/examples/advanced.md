@@ -318,6 +318,9 @@ Real-time monitoring of pipeline progress:
 import asyncio
 from antflow import Pipeline, Stage
 
+async def task1(x): return x + 1
+async def task2(x): return x * 2
+
 async def monitor_pipeline(pipeline, interval=1.0):
     """Monitor pipeline execution in real-time."""
     while True:
@@ -335,11 +338,12 @@ async def main():
     stage2 = Stage(name="Stage2", workers=3, tasks=[task2])
 
     pipeline = Pipeline(stages=[stage1, stage2])
+    items = range(100)
 
     # Run monitoring and pipeline concurrently
     async with asyncio.TaskGroup() as tg:
         # Start monitoring
-        monitor_task = tg.create_task(monitor_pipeline(pipeline))
+        monitor_task = tg.create_task(monitor_pipeline(pipeline, interval=0.1))
 
         # Run pipeline
         results = await pipeline.run(items)
@@ -349,7 +353,8 @@ async def main():
 
     print(f"Completed: {len(results)} items")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Dynamic Pipeline Modification
@@ -357,12 +362,18 @@ asyncio.run(main())
 Add or remove stages at runtime:
 
 ```python
+import asyncio
 from antflow import Pipeline, Stage
+
+async def fetch(x): return x
+async def validate(x): return x
+async def transform(x): return x
 
 async def main():
     # Start with basic pipeline
     stage1 = Stage(name="Fetch", workers=5, tasks=[fetch])
     pipeline = Pipeline(stages=[stage1])
+    items = range(10)
 
     # Add validation stage dynamically
     validation_stage = Stage(
@@ -387,6 +398,9 @@ async def main():
     await pipeline.remove_stage("Validate")
 
     print(f"Final stages: {[s.name for s in pipeline.stages]}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Collecting and Analyzing Failures
@@ -395,22 +409,28 @@ Track failed items for retry or analysis:
 
 ```python
 import asyncio
+import random
 from antflow import Pipeline, Stage
 
 class FailureCollector:
     def __init__(self):
         self.failures = []
 
-    async def on_failure(self, payload):
+    async def on_failure(self, item_id, error, metadata):
         self.failures.append({
-            'id': payload['id'],
-            'stage': payload['stage'],
-            'error': payload['error'],
-            'value': payload.get('value')
+            'id': item_id,
+            'error': str(error),
+            'metadata': metadata
         })
+
+async def risky_task(x):
+    if random.random() < 0.5:
+        raise ValueError("Random failure")
+    return x
 
 async def main():
     collector = FailureCollector()
+    items = range(10)
 
     stage = Stage(
         name="ProcessStage",
@@ -440,16 +460,18 @@ async def main():
             tasks=[risky_task],
             retry="per_task",
             task_attempts=10,
-            task_wait_seconds=5.0
+            task_wait_seconds=0.1
         )
 
         retry_pipeline = Pipeline(stages=[retry_stage])
-        retry_items = [f['value'] for f in collector.failures]
+        # In a real scenario, you'd extract the original values to retry
+        retry_items = [f['id'] for f in collector.failures] 
         retry_results = await retry_pipeline.run(retry_items)
 
         print(f"\nRetry results: {len(retry_results)} recovered")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Context Manager with Cleanup
@@ -457,18 +479,29 @@ asyncio.run(main())
 Use context managers for automatic resource cleanup:
 
 ```python
-from antflow import Pipeline
+import asyncio
+from antflow import Pipeline, Stage
+
+async def task(x): return x
 
 async def main():
+    stage1 = Stage(name="S1", workers=1, tasks=[task])
+    stage2 = Stage(name="S2", workers=1, tasks=[task])
+    stage3 = Stage(name="S3", workers=1, tasks=[task])
+    items = range(5)
+
     async with Pipeline(stages=[stage1, stage2, stage3]) as pipeline:
         # Pipeline runs and automatically cleans up
         results = await pipeline.run(items)
 
         # Do something with results
-        process_results(results)
+        print(f"Processed {len(results)} items")
 
     # Pipeline is automatically shut down here
     print("Pipeline cleaned up")
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Next Steps
