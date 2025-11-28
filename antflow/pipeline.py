@@ -152,15 +152,18 @@ class Pipeline:
             Dictionary mapping stage name to list of worker names
 
         Example:
-            >>> pipeline = Pipeline(stages=[
-            ...     Stage(name="Fetch", workers=3, tasks=[fetch]),
-            ...     Stage(name="Process", workers=2, tasks=[process])
-            ... ])
-            >>> pipeline.get_worker_names()
-            {
-                "Fetch": ["Fetch-W0", "Fetch-W1", "Fetch-W2"],
-                "Process": ["Process-W0", "Process-W1"]
-            }
+        Example:
+            ```python
+            pipeline = Pipeline(stages=[
+                Stage(name="Fetch", workers=3, tasks=[fetch]),
+                Stage(name="Process", workers=2, tasks=[process])
+            ])
+            pipeline.get_worker_names()
+            # {
+            #     "Fetch": ["Fetch-W0", "Fetch-W1", "Fetch-W2"],
+            #     "Process": ["Process-W0", "Process-W1"]
+            # }
+            ```
         """
         worker_names = {}
         for stage in self.stages:
@@ -194,10 +197,13 @@ class Pipeline:
             Dictionary mapping worker name to WorkerState
 
         Example:
-            >>> states = pipeline.get_worker_states()
-            >>> for name, state in states.items():
-            ...     if state.status == "busy":
-            ...         print(f"{name} processing item {state.current_item_id}")
+        Example:
+            ```python
+            states = pipeline.get_worker_states()
+            for name, state in states.items():
+                if state.status == "busy":
+                    print(f"{name} processing item {state.current_item_id}")
+            ```
         """
         return dict(self._worker_states)
 
@@ -209,10 +215,13 @@ class Pipeline:
             Dictionary mapping worker name to WorkerMetrics
 
         Example:
-            >>> metrics = pipeline.get_worker_metrics()
-            >>> for name, metric in metrics.items():
-            ...     print(f"{name}: {metric.items_processed} items, "
-            ...           f"avg {metric.avg_processing_time:.2f}s")
+        Example:
+            ```python
+            metrics = pipeline.get_worker_metrics()
+            for name, metric in metrics.items():
+                print(f"{name}: {metric.items_processed} items, "
+                      f"avg {metric.avg_processing_time:.2f}s")
+            ```
         """
         return dict(self._worker_metrics)
 
@@ -224,9 +233,12 @@ class Pipeline:
             DashboardSnapshot with worker states, metrics, and pipeline stats
 
         Example:
-            >>> snapshot = pipeline.get_dashboard_snapshot()
-            >>> print(f"Active workers: {sum(1 for s in snapshot.worker_states.values() if s.status == 'busy')}")
-            >>> print(f"Items processed: {snapshot.pipeline_stats.items_processed}")
+        Example:
+            ```python
+            snapshot = pipeline.get_dashboard_snapshot()
+            print(f"Active workers: {sum(1 for s in snapshot.worker_states.values() if s.status == 'busy')}")
+            print(f"Items processed: {snapshot.pipeline_stats.items_processed}")
+            ```
         """
         return DashboardSnapshot(
             worker_states=self.get_worker_states(),
