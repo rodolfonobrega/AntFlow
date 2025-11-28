@@ -58,7 +58,7 @@ class StatusTracker:
     get statistics, and retrieve event history.
 
     Example:
-    Example:
+
         ```python
         tracker = StatusTracker()
 
