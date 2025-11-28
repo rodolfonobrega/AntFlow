@@ -9,6 +9,15 @@ TaskEventType = Literal["start", "complete", "retry", "fail"]
 
 @dataclass
 class OrderedResult:
+    """
+    Result of a pipeline item processing, preserving order.
+
+    Attributes:
+        sequence_id: Internal sequence number for ordering
+        item_id: Unique identifier of the item
+        value: The processed value (or original item if failed)
+        error: Exception if processing failed, None otherwise
+    """
     sequence_id: int
     item_id: Any
     value: Any
@@ -16,15 +25,26 @@ class OrderedResult:
 
     @property
     def is_success(self) -> bool:
+        """Check if processing was successful."""
         return self.error is None
 
     @property
     def is_failure(self) -> bool:
+        """Check if processing failed."""
         return self.error is not None
 
 
 @dataclass
 class PipelineStats:
+    """
+    Aggregate statistics for the pipeline.
+
+    Attributes:
+        items_processed: Total number of items successfully processed
+        items_failed: Total number of items that failed
+        items_in_flight: Number of items currently being processed
+        queue_sizes: Dictionary mapping stage names to current queue sizes
+    """
     items_processed: int
     items_failed: int
     items_in_flight: int
@@ -33,6 +53,16 @@ class PipelineStats:
 
 @dataclass
 class WorkerState:
+    """
+    Current state of a worker.
+
+    Attributes:
+        worker_name: Unique name of the worker (e.g., 'Fetch-W0')
+        stage: Name of the stage this worker belongs to
+        status: Current status ('idle' or 'busy')
+        current_item_id: ID of the item currently being processed (if busy)
+        processing_since: Timestamp when current processing started
+    """
     worker_name: str
     stage: str
     status: WorkerStatus
@@ -42,6 +72,17 @@ class WorkerState:
 
 @dataclass
 class WorkerMetrics:
+    """
+    Performance metrics for a single worker.
+
+    Attributes:
+        worker_name: Unique name of the worker
+        stage: Name of the stage
+        items_processed: Count of successfully processed items
+        items_failed: Count of failed items
+        total_processing_time: Cumulative processing time in seconds
+        last_active: Timestamp of last activity
+    """
     worker_name: str
     stage: str
     items_processed: int = 0
@@ -51,6 +92,7 @@ class WorkerMetrics:
 
     @property
     def avg_processing_time(self) -> float:
+        """Calculate average processing time per item."""
         if self.items_processed == 0:
             return 0.0
         return self.total_processing_time / self.items_processed
@@ -88,6 +130,15 @@ class TaskEvent:
 
 @dataclass
 class DashboardSnapshot:
+    """
+    Snapshot of the entire pipeline state for monitoring.
+
+    Attributes:
+        worker_states: Dictionary of all worker states
+        worker_metrics: Dictionary of all worker metrics
+        pipeline_stats: Aggregate pipeline statistics
+        timestamp: Timestamp when snapshot was taken
+    """
     worker_states: Dict[str, WorkerState]
     worker_metrics: Dict[str, WorkerMetrics]
     pipeline_stats: PipelineStats
