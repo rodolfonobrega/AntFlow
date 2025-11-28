@@ -28,7 +28,7 @@ async def process_data(data: str):
     """Simulate processing data."""
     delay = random.uniform(1.0, 3.0)
     await asyncio.sleep(delay)
-    if random.random() < 0.1:
+    if random.random() < 0.3:
         raise ValueError("Processing error")
     return data.upper()
 
@@ -47,7 +47,7 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
-        Layout(name="upper", size=12),
+        Layout(name="upper", size=16),
         Layout(name="lower")
     )
     
@@ -76,8 +76,10 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
     stats_table.add_row("In Flight", str(stats.items_in_flight))
     
     # Calculate progress
-    completed_count = stats.items_processed + stats.items_failed
-    progress_pct = (completed_count / total_items) * 100 if total_items > 0 else 0
+    # items_processed counts completions per stage, so we normalize by number of stages
+    total_ops = total_items * len(pipeline.stages)
+    completed_ops = stats.items_processed + stats.items_failed
+    progress_pct = (completed_ops / total_ops) * 100 if total_ops > 0 else 0
     stats_table.add_row("Progress", f"{progress_pct:.1f}%")
     
     layout["stats"].update(Panel(stats_table, title="Overview"))
@@ -140,8 +142,9 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
                 style = "bold yellow"
             elif status == "retrying":
                 style = "bold magenta"
-                attempt = status_event.metadata.get("attempt", "?")
-                status_display = f"RETRYING ({attempt})"
+                attempt = status_event.metadata.get("attempt", 1)
+                retry_count = attempt - 1
+                status_display = f"RETRYING ({retry_count})"
                 info = str(status_event.metadata.get("error", ""))
             elif status == "queued":
                 style = "blue"
@@ -174,8 +177,19 @@ async def main():
     tracker = StatusTracker()
     
     # Define Stages
+    # Stage 1: Standard per-task retry (default)
     stage1 = Stage(name="Fetch", workers=4, tasks=[fetch_data], task_attempts=2)
-    stage2 = Stage(name="Process", workers=3, tasks=[process_data], task_attempts=2)
+    
+    # Stage 2: Per-stage retry to demonstrate 'retrying' status
+    # We increase failure rate slightly for demonstration
+    stage2 = Stage(
+        name="Process", 
+        workers=3, 
+        tasks=[process_data], 
+        retry="per_stage", 
+        stage_attempts=3
+    )
+    
     stage3 = Stage(name="Save", workers=2, tasks=[save_data], task_attempts=2)
     
     pipeline = Pipeline(
