@@ -197,7 +197,6 @@ class Pipeline:
             Dictionary mapping worker name to WorkerState
 
         Example:
-
             ```python
             states = pipeline.get_worker_states()
             for name, state in states.items():
@@ -215,7 +214,6 @@ class Pipeline:
             Dictionary mapping worker name to WorkerMetrics
 
         Example:
-
             ```python
             metrics = pipeline.get_worker_metrics()
             for name, metric in metrics.items():
@@ -233,7 +231,6 @@ class Pipeline:
             DashboardSnapshot with worker states, metrics, and pipeline stats
 
         Example:
-
             ```python
             snapshot = pipeline.get_dashboard_snapshot()
             print(f"Active workers: {sum(1 for s in snapshot.worker_states.values() if s.status == 'busy')}")
