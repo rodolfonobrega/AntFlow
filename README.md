@@ -267,7 +267,7 @@ async def main():
 asyncio.run(main())
 ```
 
-See the [examples/](examples/) directory for more advanced usage, including a **Rich Dashboard** example (`examples/rich_dashboard.py`).
+See the [examples/](examples/) directory for more advanced usage, including a **Rich Dashboard** example (`examples/rich_polling_dashboard.py`).
 
 ---
 

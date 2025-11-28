@@ -296,7 +296,7 @@ Run a separate loop to periodically check `pipeline.get_stats()` or `pipeline.ge
 - Decoupled monitoring (UI runs at its own FPS)
 - Reducing overhead (batching updates)
 
-**Example:** `examples/rich_dashboard.py` demonstrates this approach.
+**Example:** `examples/rich_polling_dashboard.py` demonstrates this approach.
 
 ```python
 async def monitor_loop(pipeline):
