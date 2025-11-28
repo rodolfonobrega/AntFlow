@@ -91,6 +91,7 @@ For quick reference, here are the possible values for status and event types:
 | `in_progress` | Worker has picked up the item and started processing. |
 | `completed` | All tasks in the stage finished successfully. |
 | `failed` | Stage execution failed (after all retries). |
+| `retrying` | Item failed processing and is waiting to be retried (per-stage retry). Metadata includes `attempt` and `error`. |
 
 ### Task Events (`TaskEvent.event_type`)
 | Value | Description |
