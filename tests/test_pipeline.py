@@ -96,7 +96,7 @@ class TestPipeline:
 
         assert len(results) == 10
         expected = [(i + 1) * 2 for i in range(10)]
-        actual = [r['value'] for r in results]
+        actual = [r.value for r in results]
         assert actual == expected
 
     @pytest.mark.asyncio
@@ -107,7 +107,7 @@ class TestPipeline:
         pipeline = Pipeline(stages=[stage])
         results = await pipeline.run(range(20))
 
-        ids = [r['id'] for r in results]
+        ids = [r.id for r in results]
         assert ids == list(range(20))
 
     @pytest.mark.asyncio
@@ -134,7 +134,7 @@ class TestPipeline:
         results = await pipeline.run([1])
 
         assert len(results) == 1
-        assert results[0]['value'] == 2
+        assert results[0].value == 2
         assert call_count["count"] >= 3
 
     @pytest.mark.asyncio
@@ -160,7 +160,7 @@ class TestPipeline:
         results = await pipeline.run([5])
 
         assert len(results) == 1
-        assert results[0]['value'] == 15
+        assert results[0].value == 15
 
     @pytest.mark.asyncio
     async def test_pipeline_collect_results_false(self):
@@ -278,8 +278,8 @@ class TestPipeline:
 
         assert len(results) == 5
         for i, result in enumerate(results):
-            assert result['id'] == i
-            assert result['value'] == i + 1
+            assert result.id == i
+            assert result.value == i + 1
 
     @pytest.mark.asyncio
     async def test_get_worker_names(self):

@@ -268,7 +268,7 @@ class TestStatusTracker:
         results = await pipeline.run([1, 2, 3])
 
         assert len(results) == 3
-        assert all(r["value"] == r["id"] + 2 for r in results)
+        assert all(r.value == r.id + 2 for r in results)
 
     @pytest.mark.asyncio
     async def test_status_tracker_with_callback(self):
