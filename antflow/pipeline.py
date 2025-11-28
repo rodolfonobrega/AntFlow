@@ -126,7 +126,7 @@ class Pipeline:
         Get current pipeline statistics.
 
         Returns:
-            PipelineStats with current metrics
+            [PipelineStats][antflow.types.PipelineStats] with current metrics
         """
         queue_sizes = {
             stage.name: self._queues[i].qsize()
@@ -194,7 +194,7 @@ class Pipeline:
         Get current state of all workers.
 
         Returns:
-            Dictionary mapping worker name to WorkerState
+            Dictionary mapping worker name to [WorkerState][antflow.types.WorkerState]
 
         Example:
             ```python
@@ -211,7 +211,7 @@ class Pipeline:
         Get performance metrics for all workers.
 
         Returns:
-            Dictionary mapping worker name to WorkerMetrics
+            Dictionary mapping worker name to [WorkerMetrics][antflow.types.WorkerMetrics]
 
         Example:
             ```python
@@ -228,7 +228,7 @@ class Pipeline:
         Get complete dashboard snapshot with all current state.
 
         Returns:
-            DashboardSnapshot with worker states, metrics, and pipeline stats
+            [DashboardSnapshot][antflow.types.DashboardSnapshot] with worker states, metrics, and pipeline stats
 
         Example:
             ```python

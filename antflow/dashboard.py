@@ -99,7 +99,7 @@ class PipelineDashboard:
         Get current dashboard snapshot.
 
         Returns:
-            DashboardSnapshot with complete current state
+            [DashboardSnapshot][antflow.types.DashboardSnapshot] with complete current state
 
         Example:
             >>> snapshot = dashboard.get_snapshot()
@@ -109,15 +109,15 @@ class PipelineDashboard:
         return self.pipeline.get_dashboard_snapshot()
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
-        """Get current state of all workers."""
+        """Get current state of all workers (Dict[str, [WorkerState][antflow.types.WorkerState]])."""
         return self.pipeline.get_worker_states()
 
     def get_worker_metrics(self) -> Dict[str, WorkerMetrics]:
-        """Get performance metrics for all workers."""
+        """Get performance metrics for all workers (Dict[str, [WorkerMetrics][antflow.types.WorkerMetrics]])."""
         return self.pipeline.get_worker_metrics()
 
     def get_stats(self) -> PipelineStats:
-        """Get pipeline statistics."""
+        """Get pipeline statistics ([PipelineStats][antflow.types.PipelineStats])."""
         return self.pipeline.get_stats()
 
     def get_active_workers(self) -> List[str]:

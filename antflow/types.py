@@ -111,7 +111,7 @@ class TaskEvent:
         stage: Stage name
         task_name: Name of the specific task function
         worker: Worker name processing the task
-        event_type: Type of event (start, complete, retry, fail)
+        event_type: Type of event ([TaskEventType][antflow.types.TaskEventType])
         attempt: Current attempt number (1-indexed)
         timestamp: Unix timestamp when event occurred
         error: Exception if task failed or is retrying (None otherwise)
