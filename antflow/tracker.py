@@ -46,11 +46,11 @@ class StatusTracker:
         Initialize the status tracker.
 
         Args:
-            on_status_change: Optional callback invoked on each item status change
-            on_task_start: Optional callback when a task starts executing
-            on_task_complete: Optional callback when a task completes successfully
-            on_task_retry: Optional callback when a task is retrying after failure
-            on_task_fail: Optional callback when a task fails after all retries
+            on_status_change: Optional callback invoked on each item [StatusEvent][antflow.types.StatusEvent]
+            on_task_start: Optional callback when a task starts executing ([TaskEvent][antflow.types.TaskEvent])
+            on_task_complete: Optional callback when a task completes successfully ([TaskEvent][antflow.types.TaskEvent])
+            on_task_retry: Optional callback when a task is retrying after failure ([TaskEvent][antflow.types.TaskEvent])
+            on_task_fail: Optional callback when a task fails after all retries ([TaskEvent][antflow.types.TaskEvent])
         """
         self.on_status_change = on_status_change
         self.on_task_start = on_task_start
@@ -65,7 +65,7 @@ class StatusTracker:
         Internal method to record and emit a status event.
 
         Args:
-            event: The status event to emit
+            event: The [StatusEvent][antflow.types.StatusEvent] to emit
         """
         if event.item_id not in self._history:
             self._history[event.item_id] = []
@@ -81,7 +81,7 @@ class StatusTracker:
         Internal method to emit a task-level event.
 
         Args:
-            event: The task event to emit
+            event: The [TaskEvent][antflow.types.TaskEvent] to emit
         """
         if event.event_type == "start" and self.on_task_start:
             await self.on_task_start(event)
@@ -100,7 +100,7 @@ class StatusTracker:
             item_id: The item identifier
 
         Returns:
-            The most recent StatusEvent for the item, or None if not found
+            The most recent [StatusEvent][antflow.types.StatusEvent] for the item, or None if not found
         """
         return self._current_status.get(item_id)
 
@@ -112,7 +112,7 @@ class StatusTracker:
             status: The status to filter by
 
         Returns:
-            List of StatusEvents for items with the given status
+            List of [StatusEvents][antflow.types.StatusEvent] for items with the given status
         """
         return [
             event for event in self._current_status.values()
@@ -146,6 +146,6 @@ class StatusTracker:
             item_id: The item identifier
 
         Returns:
-            List of all StatusEvents for the item, in chronological order
+            List of all [StatusEvents][antflow.types.StatusEvent] for the item, in chronological order
         """
         return self._history.get(item_id, [])
