@@ -2,7 +2,7 @@ import asyncio
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterable, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterable, Callable, Dict, List, Optional, Sequence
 
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -40,6 +40,8 @@ class Stage:
     task_wait_seconds: float = 1.0
     stage_attempts: int = 3
     unpack_args: bool = False
+    on_success: Optional[Callable[[Any, Any, Dict[str, Any]], Any]] = None
+    on_failure: Optional[Callable[[Any, Exception, Dict[str, Any]], Any]] = None
 
     def validate(self) -> None:
         """
@@ -616,6 +618,15 @@ class Pipeline:
                             metadata=meta
                         ))
 
+                if stage.on_success:
+                    try:
+                        if asyncio.iscoroutinefunction(stage.on_success):
+                            await stage.on_success(item_id, payload["value"], payload)
+                        else:
+                            stage.on_success(item_id, payload["value"], payload)
+                    except Exception as e:
+                        logger.error(f"[{name}] Error in on_success callback: {e}")
+
                 self._items_processed += 1
                 logger.debug(f"[{name}] END stage={stage.name} id={item_id}")
 
@@ -642,6 +653,15 @@ class Pipeline:
                     "failed",
                     metadata={"error": str(original_error)}
                 )
+
+                if stage.on_failure:
+                    try:
+                        if asyncio.iscoroutinefunction(stage.on_failure):
+                            await stage.on_failure(item_id, original_error, {})
+                        else:
+                            stage.on_failure(item_id, original_error, {})
+                    except Exception as e:
+                        logger.error(f"[{name}] Error in on_failure callback: {e}")
             finally:
                 self._worker_states[name].status = "idle"
                 self._worker_states[name].current_item_id = None
