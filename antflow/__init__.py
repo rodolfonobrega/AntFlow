@@ -16,7 +16,7 @@ from .pipeline import Pipeline, Stage
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardSnapshot,
-
+    PipelineResult,
     PipelineStats,
     StatusType,
     TaskEvent,
@@ -34,7 +34,7 @@ __all__ = [
     "AntFlowError",
     "DashboardSnapshot",
     "ExecutorShutdownError",
-
+    "PipelineResult",
     "Pipeline",
     "PipelineDashboard",
     "PipelineError",

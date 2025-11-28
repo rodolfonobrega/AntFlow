@@ -15,6 +15,7 @@ from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardSnapshot,
+    PipelineResult,
     PipelineStats,
     TaskEvent,
     TaskFunc,
@@ -107,7 +108,7 @@ class Pipeline:
 
         self._stop_event = asyncio.Event()
         self._queues: List[asyncio.Queue] = [asyncio.Queue() for _ in stages]
-        self._results: List[Dict[str, Any]] = []
+        self._results: List[PipelineResult] = []
         self._sequence_counter = 0
         self._items_processed = 0
         self._items_failed = 0
@@ -119,13 +120,13 @@ class Pipeline:
         self._initialize_worker_tracking()
 
     @property
-    def results(self) -> List[Dict[str, Any]]:
+    def results(self) -> List[PipelineResult]:
         """
         Get collected results, sorted by original input sequence.
 
         Only contains data if `collect_results=True` was passed to `__init__`.
         """
-        return sorted(self._results, key=lambda x: x.get("_sequence_id", 0))
+        return sorted(self._results, key=lambda x: x.sequence_id)
 
     def get_stats(self) -> PipelineStats:
         """
@@ -316,7 +317,7 @@ class Pipeline:
         self._sequence_counter += 1
         return payload
 
-    async def run(self, items: Sequence[Any]) -> List[Dict[str, Any]]:
+    async def run(self, items: Sequence[Any]) -> List[PipelineResult]:
         """
         Run the pipeline end-to-end with the given items.
 
@@ -324,19 +325,20 @@ class Pipeline:
             items: Items to process through the pipeline. Can be a list of values or dictionaries.
 
         Returns:
-            List of result dictionaries, sorted by input sequence.
-            Each dictionary contains:
-            - `id`: The item's unique identifier (preserved or auto-generated)
-            - `value`: The final processed output from the last stage
-            - Any other keys present in the original input item (if it was a dictionary)
+            List of [PipelineResult][antflow.types.PipelineResult] objects, sorted by input sequence.
+            Each result contains:
+            - `id`: The item's unique identifier
+            - `value`: The final processed output
+            - `metadata`: Dictionary of any other keys from the original input
+            - `sequence_id`: Internal sequence number
 
             Example:
                 ```python
                 # Input: [{"id": "a", "value": 1, "meta": "x"}, {"id": "b", "value": 2}]
                 # Output:
                 # [
-                #     {"id": "a", "value": 10, "meta": "x", "_sequence_id": 0},
-                #     {"id": "b", "value": 20, "_sequence_id": 1}
+                #     PipelineResult(id="a", value=10, metadata={"meta": "x"}, sequence_id=0),
+                #     PipelineResult(id="b", value=20, metadata={}, sequence_id=1)
                 # ]
                 ```
         """
@@ -597,7 +599,22 @@ class Pipeline:
                         )
                 else:
                     if self.collect_results:
-                        self._results.append({**payload})
+                        # Extract known fields
+                        res_id = payload["id"]
+                        res_value = payload["value"]
+                        seq_id = payload["_sequence_id"]
+                        # Everything else goes to metadata
+                        meta = {
+                            k: v for k, v in payload.items()
+                            if k not in ("id", "value", "_sequence_id")
+                        }
+                        
+                        self._results.append(PipelineResult(
+                            id=res_id,
+                            value=res_value,
+                            sequence_id=seq_id,
+                            metadata=meta
+                        ))
 
                 self._items_processed += 1
                 logger.debug(f"[{name}] END stage={stage.name} id={item_id}")

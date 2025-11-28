@@ -211,7 +211,8 @@ async def main():
     print(f"Completed: {len(results)} items")
     print(f"Stats: {pipeline.get_stats()}")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 **Why different worker counts?**
@@ -227,10 +228,11 @@ Track every item as it flows through your pipeline with **StatusTracker**. Get r
 
 ```python
 from antflow import Pipeline, Stage, StatusTracker
+import asyncio
 
 # Mock tasks
 async def fetch(x): return x
-async def process(x): return x
+async def process(x): return x * 2
 async def save(x): return x
 
 # 1. Define a callback for real-time updates
@@ -250,16 +252,19 @@ pipeline = Pipeline(
 )
 
 # 2. Run pipeline (logs will print in real-time)
-items = range(50)
-results = await pipeline.run(items)
+async def main():
+    items = range(50)
+    results = await pipeline.run(items)
 
-# 3. Get final statistics
-stats = tracker.get_stats()
-print(f"Completed: {stats['completed']}")
-print(f"Failed: {stats['failed']}")
+    # 3. Get final statistics
+    stats = tracker.get_stats()
+    print(f"Completed: {stats['completed']}")
+    print(f"Failed: {stats['failed']}")
 
-# Get full history for an item
-history = tracker.get_history(item_id=42)
+    # Get full history for an item
+    history = tracker.get_history(item_id=0)
+
+asyncio.run(main())
 ```
 
 See the [examples/](examples/) directory for more advanced usage, including a **Rich Dashboard** example (`examples/rich_dashboard.py`).

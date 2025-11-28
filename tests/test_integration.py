@@ -53,8 +53,8 @@ class TestIntegration:
 
         assert len(results) == 10
         for result in results:
-            assert result['value']['processed'] is True
-            assert result['value']['saved'] is True
+            assert result.value['processed'] is True
+            assert result.value['saved'] is True
 
     @pytest.mark.asyncio
     async def test_multi_stage_etl_pipeline(self):
@@ -92,8 +92,8 @@ class TestIntegration:
         assert len(results) == 20
 
         for i, result in enumerate(results):
-            assert result['id'] == i
-            value = result['value']
+            assert result.id == i
+            value = result.value
             assert value['id'] == i
             assert value['processed'] is True
             assert value['saved'] is True
@@ -157,8 +157,8 @@ class TestIntegration:
 
         assert len(results) == 5
         for result in results:
-            assert result['value']['processed'] is True
-            assert result['value']['saved'] is True
+            assert result.value['processed'] is True
+            assert result.value['saved'] is True
 
     @pytest.mark.asyncio
     async def test_large_scale_processing(self):
@@ -181,6 +181,6 @@ class TestIntegration:
 
         assert len(results) == num_items
 
-        values = [r['value'] for r in results]
+        values = [r.value for r in results]
         expected = [i + 1 for i in range(num_items)]
         assert values == expected
