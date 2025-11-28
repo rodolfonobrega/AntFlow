@@ -86,7 +86,9 @@ class Pipeline:
 
         Args:
             stages: List of Stage objects defining the pipeline
-            collect_results: If True, collect results from final stage
+            collect_results: If True, collects results from the final stage into `self.results`.
+                If False, results are discarded after processing (useful for fire-and-forget or side-effect only pipelines).
+                Defaults to True.
             status_tracker: Optional StatusTracker for monitoring item status
 
         Raises:
@@ -118,7 +120,11 @@ class Pipeline:
 
     @property
     def results(self) -> List[Dict[str, Any]]:
-        """Get collected results, sorted by sequence."""
+        """
+        Get collected results, sorted by original input sequence.
+
+        Only contains data if `collect_results=True` was passed to `__init__`.
+        """
         return sorted(self._results, key=lambda x: x.get("_sequence_id", 0))
 
     def get_stats(self) -> PipelineStats:
@@ -315,10 +321,24 @@ class Pipeline:
         Run the pipeline end-to-end with the given items.
 
         Args:
-            items: Items to process through the pipeline
+            items: Items to process through the pipeline. Can be a list of values or dictionaries.
 
         Returns:
-            List of result dictionaries
+            List of result dictionaries, sorted by input sequence.
+            Each dictionary contains:
+            - `id`: The item's unique identifier (preserved or auto-generated)
+            - `value`: The final processed output from the last stage
+            - Any other keys present in the original input item (if it was a dictionary)
+
+            Example:
+                ```python
+                # Input: [{"id": "a", "value": 1, "meta": "x"}, {"id": "b", "value": 2}]
+                # Output:
+                # [
+                #     {"id": "a", "value": 10, "meta": "x", "_sequence_id": 0},
+                #     {"id": "b", "value": 20, "_sequence_id": 1}
+                # ]
+                ```
         """
         await self.feed(items)
 
