@@ -11,6 +11,30 @@ TaskEventType = Literal["start", "complete", "retry", "fail"]
 
 
 @dataclass
+class PipelineResult:
+    """
+    Result of a pipeline execution for a single item.
+
+    Attributes:
+        id: Unique identifier of the item
+        value: The final processed value
+        sequence_id: Internal sequence number for ordering
+        metadata: Additional metadata from the input item
+        error: Exception if processing failed (usually None for successful results)
+    """
+    id: Any
+    value: Any
+    sequence_id: int
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[Exception] = None
+
+    @property
+    def is_success(self) -> bool:
+        """Check if processing was successful."""
+        return self.error is None
+
+
+@dataclass
 class PipelineStats:
     """
     Aggregate statistics for the pipeline.

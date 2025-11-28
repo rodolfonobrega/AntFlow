@@ -28,9 +28,9 @@ async def test_unpack_args_tuple():
     results = await pipeline.run(inputs)
     
     assert len(results) == 3
-    assert results[0]["value"] == 3
-    assert results[1]["value"] == 7
-    assert results[2]["value"] == 11
+    assert results[0].value == 3
+    assert results[1].value == 7
+    assert results[2].value == 11
 
 @pytest.mark.asyncio
 async def test_unpack_args_dict():
@@ -50,8 +50,8 @@ async def test_unpack_args_dict():
     results = await pipeline.run(inputs)
     
     assert len(results) == 2
-    assert results[0]["value"] == "Hello, Alice!"
-    assert results[1]["value"] == "Hi, Bob!"
+    assert results[0].value == "Hello, Alice!"
+    assert results[1].value == "Hi, Bob!"
 
 @pytest.mark.asyncio
 async def test_unpack_args_mixed_pipeline():
@@ -88,8 +88,8 @@ async def test_unpack_args_mixed_pipeline():
     
     # (1+1)*2 = 4
     # (2+2)*2 = 8
-    assert results[0]["value"] == 4
-    assert results[1]["value"] == 8
+    assert results[0].value == 4
+    assert results[1].value == 8
 
 @pytest.mark.asyncio
 async def test_unpack_args_scalar_input():
@@ -107,6 +107,6 @@ async def test_unpack_args_scalar_input():
     results = await pipeline.run(inputs)
     
     assert len(results) == 3
-    assert results[0]["value"] == 1
-    assert results[1]["value"] == "test"
-    assert results[2]["value"] == 3.14
+    assert results[0].value == 1
+    assert results[1].value == "test"
+    assert results[2].value == 3.14

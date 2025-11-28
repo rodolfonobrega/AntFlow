@@ -36,6 +36,9 @@ async def main():
     # Run
     urls = ["http://example.com/1", "http://example.com/2"]
     results = await pipeline.run(urls)
+
+    for result in results:
+        print(f"ID: {result.id}, Value: {result.value}")
 ```
 
 
