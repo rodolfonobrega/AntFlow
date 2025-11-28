@@ -53,13 +53,14 @@ Base exception for pipeline-specific errors:
 ```python
 from antflow import Pipeline, PipelineError
 
-pipeline = Pipeline(stages=[stage1])
-
 try:
-    await pipeline.remove_stage("NonExistent")
+    # Example: Attempting invalid operation
+    raise PipelineError("Cannot modify pipeline while running")
 except PipelineError as e:
     print(f"Pipeline error: {e}")
 ```
+
+
 
 ### StageValidationError
 
