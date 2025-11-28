@@ -217,40 +217,7 @@ class TestPipeline:
         assert 2 in failure_calls
         assert 3 in success_calls
 
-    @pytest.mark.asyncio
-    async def test_add_stage(self):
-        """Test adding a stage dynamically."""
-        stage1 = Stage(name="Stage1", workers=1, tasks=[add_one])
 
-        pipeline = Pipeline(stages=[stage1])
-
-        stage2 = Stage(name="Stage2", workers=1, tasks=[multiply_two])
-        await pipeline.add_stage(stage2)
-
-        assert len(pipeline.stages) == 2
-        assert pipeline.stages[1].name == "Stage2"
-
-    @pytest.mark.asyncio
-    async def test_remove_stage(self):
-        """Test removing a stage."""
-        stage1 = Stage(name="Stage1", workers=1, tasks=[add_one])
-        stage2 = Stage(name="Stage2", workers=1, tasks=[multiply_two])
-
-        pipeline = Pipeline(stages=[stage1, stage2])
-        await pipeline.remove_stage("Stage1")
-
-        assert len(pipeline.stages) == 1
-        assert pipeline.stages[0].name == "Stage2"
-
-    @pytest.mark.asyncio
-    async def test_remove_nonexistent_stage(self):
-        """Test removing a stage that doesn't exist."""
-        stage = Stage(name="Stage1", workers=1, tasks=[add_one])
-
-        pipeline = Pipeline(stages=[stage])
-
-        with pytest.raises(PipelineError, match="Stage 'NonExistent' not found"):
-            await pipeline.remove_stage("NonExistent")
 
     @pytest.mark.asyncio
     async def test_pipeline_context_manager(self):

@@ -370,72 +370,7 @@ class Pipeline:
 
         return self.results
 
-    async def add_stage(self, stage: Stage, position: Optional[int] = None) -> None:
-        """
-        Add a stage to the pipeline dynamically.
 
-        Args:
-            stage: Stage to add
-            position: Position to insert at (None = append to end)
-
-        Raises:
-            StageValidationError: If stage configuration is invalid
-            PipelineError: If pipeline is currently running
-        """
-        if self._worker_tasks:
-            raise PipelineError("Cannot add stages while pipeline is running")
-
-        stage.validate()
-
-        if position is None:
-            self.stages.append(stage)
-            self._queues.append(asyncio.Queue())
-        else:
-            self.stages.insert(position, stage)
-            self._queues.insert(position, asyncio.Queue())
-
-        for i in range(stage.workers):
-            worker_name = f"{stage.name}-W{i}"
-
-            self._worker_states[worker_name] = WorkerState(
-                worker_name=worker_name,
-                stage=stage.name,
-                status="idle"
-            )
-
-            self._worker_metrics[worker_name] = WorkerMetrics(
-                worker_name=worker_name,
-                stage=stage.name
-            )
-
-        logger.info(f"Added stage '{stage.name}' at position {position or len(self.stages)-1}")
-
-    async def remove_stage(self, name: str) -> None:
-        """
-        Remove a stage from the pipeline by name.
-
-        Args:
-            name: Name of the stage to remove
-
-        Raises:
-            PipelineError: If stage not found or pipeline is running
-        """
-        if self._worker_tasks:
-            raise PipelineError("Cannot remove stages while pipeline is running")
-
-        for i, stage in enumerate(self.stages):
-            if stage.name == name:
-                for j in range(stage.workers):
-                    worker_name = f"{stage.name}-W{j}"
-                    self._worker_states.pop(worker_name, None)
-                    self._worker_metrics.pop(worker_name, None)
-
-                self.stages.pop(i)
-                self._queues.pop(i)
-                logger.info(f"Removed stage '{name}'")
-                return
-
-        raise PipelineError(f"Stage '{name}' not found")
 
     async def shutdown(self) -> None:
         """Shut down the pipeline gracefully."""

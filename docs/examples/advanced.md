@@ -357,51 +357,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## Dynamic Pipeline Modification
 
-Add or remove stages at runtime:
-
-```python
-import asyncio
-from antflow import Pipeline, Stage
-
-async def fetch(x): return x
-async def validate(x): return x
-async def transform(x): return x
-
-async def main():
-    # Start with basic pipeline
-    stage1 = Stage(name="Fetch", workers=5, tasks=[fetch])
-    pipeline = Pipeline(stages=[stage1])
-    items = range(10)
-
-    # Add validation stage dynamically
-    validation_stage = Stage(
-        name="Validate",
-        workers=3,
-        tasks=[validate]
-    )
-    await pipeline.add_stage(validation_stage)
-
-    # Add transformation stage at specific position
-    transform_stage = Stage(
-        name="Transform",
-        workers=2,
-        tasks=[transform]
-    )
-    await pipeline.add_stage(transform_stage, position=2)
-
-    # Run modified pipeline
-    results = await pipeline.run(items)
-
-    # Remove a stage if needed
-    await pipeline.remove_stage("Validate")
-
-    print(f"Final stages: {[s.name for s in pipeline.stages]}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
 
 ## Collecting and Analyzing Failures
 
