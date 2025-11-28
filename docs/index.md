@@ -3,7 +3,7 @@
 **Stop waiting for the slowest task. Start processing smarter.**
 
 <p align="center">
-  <img src="images/worker-pool-concept.png" alt="AntFlow Worker Pool Concept" width="600">
+  <img src="images/antflow-workers.png" alt="AntFlow Worker Pool Concept" width="600">
 </p>
 
 AntFlow is a modern async execution library for Python that solves a fundamental problem in batch processing: **the slowest task bottleneck**.

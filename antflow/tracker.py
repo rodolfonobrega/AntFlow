@@ -58,16 +58,19 @@ class StatusTracker:
     get statistics, and retrieve event history.
 
     Example:
-        >>> tracker = StatusTracker()
-        >>>
-        >>> async def on_change(event: StatusEvent):
-        ...     print(f"Item {event.item_id}: {event.status}")
-        >>>
-        >>> tracker.on_status_change = on_change
-        >>> pipeline = Pipeline(stages=[...], status_tracker=tracker)
-        >>>
-        >>> results = await pipeline.run(items)
-        >>> print(tracker.get_stats())
+    Example:
+        ```python
+        tracker = StatusTracker()
+
+        async def on_change(event: StatusEvent):
+            print(f"Item {event.item_id}: {event.status}")
+
+        tracker.on_status_change = on_change
+        pipeline = Pipeline(stages=[...], status_tracker=tracker)
+
+        results = await pipeline.run(items)
+        print(tracker.get_stats())
+        ```
     """
 
     def __init__(
