@@ -728,8 +728,12 @@ class Pipeline:
                 await self._emit_status(
                     item_id,
                     stage.name,
-                    "queued",
-                    metadata={"attempt": attempt + 1, "retry": True}
+                    "retrying",
+                    metadata={
+                        "attempt": attempt + 1,
+                        "retry": True,
+                        "error": str(original_error)
+                    }
                 )
 
                 return None
