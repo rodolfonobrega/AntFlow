@@ -64,6 +64,26 @@ for name, state in worker_states.items():
     print(f"Worker {name}: {state.status}")
 ```
 
+## Event Types
+
+For quick reference, here are the possible values for status and event types:
+
+### Item Status (`StatusEvent.status`)
+| Value | Description |
+|-------|-------------|
+| `queued` | Item has been added to a stage's input queue. |
+| `in_progress` | Worker has picked up the item and started processing. |
+| `completed` | All tasks in the stage finished successfully. |
+| `failed` | Stage execution failed (after all retries). |
+
+### Task Events (`TaskEvent.event_type`)
+| Value | Description |
+|-------|-------------|
+| `start` | A specific task function started running. |
+| `complete` | Task function returned successfully. |
+| `retry` | Task failed but has retries remaining. |
+| `fail` | Task failed and has no retries left. |
+
 ## Class Reference
 
 ### StatusEvent
