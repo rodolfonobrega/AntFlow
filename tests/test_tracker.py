@@ -253,7 +253,7 @@ class TestStatusTracker:
 
         retry_queued_events = [
             e for e in events
-            if e.status == "queued" and e.metadata.get("retry")
+            if e.status == "retrying" and e.metadata.get("retry")
         ]
 
         assert len(retry_queued_events) > 0
