@@ -1,20 +1,38 @@
 """
-Real-time dashboard example with WebSocket streaming.
+Real-time dashboard example with WebSocket streaming and Rich UI.
 
 This example demonstrates how to build a real-time dashboard
-that monitors pipeline execution via WebSocket.
+that monitors pipeline execution via WebSocket, displaying logs
+and metrics in a terminal UI.
 """
 
 import asyncio
 import json
-from typing import Set
+import random
+import time
+from collections import deque
+from typing import Set, Deque
+
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from antflow import Pipeline, PipelineDashboard, Stage, StatusEvent, StatusTracker
 
+# Global log buffer
+log_messages: Deque[str] = deque(maxlen=20)
+
+def log(message: str):
+    """Log a message to the buffer."""
+    timestamp = time.strftime("%H:%M:%S")
+    log_messages.append(f"[{timestamp}] {message}")
 
 async def process_item(x: int) -> int:
     """Simulate some processing work."""
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(random.uniform(0.1, 0.5))
     if x % 10 == 0:
         raise ValueError(f"Item {x} failed processing")
     return x * 2
@@ -30,7 +48,13 @@ class MockWebSocket:
     async def send_json(self, data: dict):
         """Simulate sending JSON to client."""
         self.messages.append(data)
-        print(f"[WS-{self.client_id}] Sent: {json.dumps(data, indent=2)}")
+        # Log only significant events to avoid flooding the log panel
+        if data.get("type") == "initial_state":
+            log(f"[WS-{self.client_id}] Sent initial state")
+        elif data.get("type") == "status_change":
+            event = data.get("event", {})
+            if event.get("status") == "failed":
+                 log(f"[WS-{self.client_id}] Sent failure alert for item {event.get('item_id')}")
 
 
 class DashboardServer:
@@ -48,7 +72,7 @@ class DashboardServer:
     async def handle_client(self, websocket: MockWebSocket):
         """Handle a WebSocket client connection."""
         self.clients.add(websocket)
-        print(f"\n[Server] Client {websocket.client_id} connected")
+        log(f"[Server] Client {websocket.client_id} connected")
 
         initial_snapshot = self.dashboard.get_snapshot()
         await websocket.send_json({
@@ -95,55 +119,96 @@ class DashboardServer:
 
         self.dashboard.subscribe(on_status_change)
 
-        print(f"[Server] Client {websocket.client_id} subscribed to events")
+        log(f"[Server] Client {websocket.client_id} subscribed to events")
 
     async def disconnect_client(self, websocket: MockWebSocket):
         """Handle client disconnection."""
         self.clients.discard(websocket)
-        print(f"[Server] Client {websocket.client_id} disconnected")
+        log(f"[Server] Client {websocket.client_id} disconnected")
 
 
-async def print_dashboard_updates(snapshot):
-    """Print dashboard updates to console."""
-    active_workers = [
-        name for name, state in snapshot.worker_states.items()
-        if state.status == "busy"
-    ]
-
-    print(f"\n{'='*60}")
-    print(f"Dashboard Update @ {snapshot.timestamp:.2f}")
-    print(f"{'='*60}")
-    print(f"Active workers: {len(active_workers)}/{len(snapshot.worker_states)}")
-    print(f"Items processed: {snapshot.pipeline_stats.items_processed}")
-    print(f"Items failed: {snapshot.pipeline_stats.items_failed}")
-    print(f"Items in flight: {snapshot.pipeline_stats.items_in_flight}")
-    print(f"Queue sizes: {snapshot.pipeline_stats.queue_sizes}")
-
-    if active_workers:
-        print(f"\nBusy workers:")
-        for worker in active_workers[:5]:
-            state = snapshot.worker_states[worker]
-            print(f"  - {worker}: processing item {state.current_item_id}")
-
-    top_performers = sorted(
-        snapshot.worker_metrics.items(),
-        key=lambda x: x[1].items_processed,
-        reverse=True
-    )[:3]
-
-    if top_performers:
-        print(f"\nTop performers:")
-        for worker, metrics in top_performers:
-            if metrics.items_processed > 0:
-                print(
-                    f"  - {worker}: {metrics.items_processed} items, "
-                    f"avg {metrics.avg_processing_time:.3f}s"
-                )
+def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: int) -> Layout:
+    """Generate the dashboard layout."""
+    snapshot = pipeline.get_dashboard_snapshot()
+    stats = snapshot.pipeline_stats
+    
+    # Main Layout
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="upper", size=12),
+        Layout(name="logs", ratio=1)
+    )
+    
+    # Header
+    layout["header"].update(
+        Panel(
+            Text("AntFlow WebSocket Dashboard", justify="center", style="bold cyan"),
+            style="cyan"
+        )
+    )
+    
+    # Upper Section - Split into Stats and Workers
+    layout["upper"].split_row(
+        Layout(name="stats", ratio=1),
+        Layout(name="workers", ratio=2)
+    )
+    
+    # Stats Table
+    stats_table = Table(title="Pipeline Statistics", expand=True)
+    stats_table.add_column("Metric", style="cyan")
+    stats_table.add_column("Value", style="magenta")
+    
+    stats_table.add_row("Total Items", str(total_items))
+    stats_table.add_row("Processed", str(stats.items_processed))
+    stats_table.add_row("Failed", str(stats.items_failed))
+    stats_table.add_row("In Flight", str(stats.items_in_flight))
+    
+    # Calculate progress
+    completed_count = stats.items_processed + stats.items_failed
+    progress_pct = (completed_count / total_items) * 100 if total_items > 0 else 0
+    stats_table.add_row("Progress", f"{progress_pct:.1f}%")
+    
+    layout["stats"].update(Panel(stats_table, title="Overview"))
+    
+    # Worker Monitor Table
+    worker_table = Table(title="Worker Monitor", expand=True)
+    worker_table.add_column("Worker", style="blue")
+    worker_table.add_column("Stage", style="yellow")
+    worker_table.add_column("Status", style="white")
+    worker_table.add_column("Current Item", style="cyan")
+    worker_table.add_column("Processed", style="green", justify="right")
+    
+    for worker_name, state in sorted(snapshot.worker_states.items()):
+        metrics = snapshot.worker_metrics.get(worker_name)
+        processed = metrics.items_processed if metrics else 0
+        
+        status_style = "bold green" if state.status == "busy" else "dim white"
+        current_item = str(state.current_item_id) if state.current_item_id is not None else "-"
+        
+        worker_table.add_row(
+            worker_name,
+            state.stage,
+            Text(state.status.upper(), style=status_style),
+            current_item,
+            str(processed)
+        )
+        
+    layout["workers"].update(Panel(worker_table, title="Active Workers"))
+    
+    # Logs Panel
+    log_text = Text()
+    for msg in log_messages:
+        log_text.append(msg + "\n")
+        
+    layout["logs"].update(Panel(log_text, title="Server Logs", style="white"))
+    
+    return layout
 
 
 async def main():
-    print("=== Real-Time Dashboard with WebSocket Example ===\n")
-
+    console = Console()
+    
     tracker = StatusTracker()
 
     stage1 = Stage(
@@ -167,14 +232,18 @@ async def main():
         status_tracker=tracker
     )
 
-    dashboard = PipelineDashboard(
+    # We don't need the Dashboard class for the UI, but we use it for the Server logic
+    # Actually, we can just use the pipeline and tracker directly for the UI
+    # and keep the server logic separate.
+    
+    # Initialize Dashboard for Server (logic only)
+    dashboard_logic = PipelineDashboard(
         pipeline=pipeline,
         tracker=tracker,
-        on_update=print_dashboard_updates,
         update_interval=2.0
     )
 
-    server = DashboardServer(dashboard)
+    server = DashboardServer(dashboard_logic)
 
     client1 = MockWebSocket("client-1")
     client2 = MockWebSocket("client-2")
@@ -182,44 +251,42 @@ async def main():
     await server.handle_client(client1)
     await server.handle_client(client2)
 
-    async with dashboard:
-        print("\n[Pipeline] Starting processing of 50 items...\n")
+    num_items = 50
+    items = range(num_items)
 
-        pipeline_task = asyncio.create_task(pipeline.run(range(50)))
+    log("Starting pipeline processing...")
+    
+    pipeline_task = asyncio.create_task(pipeline.run(items))
 
-        await pipeline_task
-
-        await asyncio.sleep(1.0)
+    # Live Dashboard Loop
+    try:
+        with Live(generate_dashboard(pipeline, tracker, num_items), refresh_per_second=4, screen=True) as live:
+            while not pipeline_task.done():
+                live.update(generate_dashboard(pipeline, tracker, num_items))
+                await asyncio.sleep(0.2)
+                
+            # Final update
+            live.update(generate_dashboard(pipeline, tracker, num_items))
+            await asyncio.sleep(2)
+            
+    except Exception as e:
+        console.print(f"[red]Dashboard Error: {e}[/red]")
 
     await server.disconnect_client(client1)
     await server.disconnect_client(client2)
 
-    print(f"\n{'='*60}")
-    print("Final Statistics")
-    print(f"{'='*60}")
-
-    final_snapshot = dashboard.get_snapshot()
-
-    print(f"Total processed: {final_snapshot.pipeline_stats.items_processed}")
-    print(f"Total failed: {final_snapshot.pipeline_stats.items_failed}")
-
-    print(f"\nWorker metrics:")
-    for worker, metrics in sorted(dashboard.get_worker_metrics().items()):
-        if metrics.items_processed > 0 or metrics.items_failed > 0:
-            print(
-                f"  {worker}: "
-                f"{metrics.items_processed} processed, "
-                f"{metrics.items_failed} failed, "
-                f"avg {metrics.avg_processing_time:.3f}s"
-            )
-
-    utilization = dashboard.get_worker_utilization()
-    avg_utilization = sum(utilization.values()) / len(utilization) if utilization else 0
-    print(f"\nAverage worker utilization: {avg_utilization*100:.1f}%")
-
-    print(f"\nClient 1 received {len(client1.messages)} messages")
-    print(f"Client 2 received {len(client2.messages)} messages")
+    # Final stats
+    console.print(f"\n[bold green]Processing Complete![/bold green]")
+    stats = tracker.get_stats()
+    console.print(f"Total processed: {stats['completed']}")
+    console.print(f"Total failed: {stats['failed']}")
+    
+    console.print(f"\nClient 1 received {len(client1.messages)} messages")
+    console.print(f"Client 2 received {len(client2.messages)} messages")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
