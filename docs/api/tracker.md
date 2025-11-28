@@ -64,6 +64,18 @@ for name, state in worker_states.items():
     print(f"Worker {name}: {state.status}")
 ```
 
+## Available Callbacks
+
+You can provide these async callbacks to the `StatusTracker` constructor to react to specific events:
+
+| Callback | Signature | Description |
+|----------|-----------|-------------|
+| `on_status_change` | `async def fn(event: StatusEvent)` | Triggered when an item's status changes (queued, in_progress, completed, failed). |
+| `on_task_start` | `async def fn(event: TaskEvent)` | Triggered when a specific task function starts execution. |
+| `on_task_complete` | `async def fn(event: TaskEvent)` | Triggered when a task function completes successfully. |
+| `on_task_retry` | `async def fn(event: TaskEvent)` | Triggered when a task fails but will be retried. |
+| `on_task_fail` | `async def fn(event: TaskEvent)` | Triggered when a task fails permanently (after all retries). |
+
 ## Event Types
 
 For quick reference, here are the possible values for status and event types:
