@@ -156,3 +156,6 @@ Thumbs.db
 Dockerfile.git
 git-docker.sh
 GITHUB_SETUP.md
+
+# Text files
+*.txt
