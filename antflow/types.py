@@ -134,9 +134,9 @@ class DashboardSnapshot:
     Snapshot of the entire pipeline state for monitoring.
 
     Attributes:
-        worker_states: Dictionary of all worker states
-        worker_metrics: Dictionary of all worker metrics
-        pipeline_stats: Aggregate pipeline statistics
+        worker_states: Dictionary of all [WorkerState][antflow.types.WorkerState]
+        worker_metrics: Dictionary of all [WorkerMetrics][antflow.types.WorkerMetrics]
+        pipeline_stats: Aggregate [PipelineStats][antflow.types.PipelineStats]
         timestamp: Timestamp when snapshot was taken
     """
     worker_states: Dict[str, WorkerState]
