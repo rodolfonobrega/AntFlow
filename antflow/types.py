@@ -7,31 +7,7 @@ WorkerStatus = Literal["idle", "busy"]
 TaskEventType = Literal["start", "complete", "retry", "fail"]
 
 
-@dataclass
-class OrderedResult:
-    """
-    Result of a pipeline item processing, preserving order.
 
-    Attributes:
-        sequence_id: Internal sequence number for ordering
-        item_id: Unique identifier of the item
-        value: The processed value (or original item if failed)
-        error: Exception if processing failed, None otherwise
-    """
-    sequence_id: int
-    item_id: Any
-    value: Any
-    error: Exception | None = None
-
-    @property
-    def is_success(self) -> bool:
-        """Check if processing was successful."""
-        return self.error is None
-
-    @property
-    def is_failure(self) -> bool:
-        """Check if processing failed."""
-        return self.error is not None
 
 
 @dataclass
