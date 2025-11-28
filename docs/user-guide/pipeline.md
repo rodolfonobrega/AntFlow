@@ -266,35 +266,49 @@ results = await pipeline.run(items)
 
 
 
-## Monitoring and Metrics
+## Monitoring Strategies
 
-### Getting Statistics
+AntFlow supports two primary ways to monitor your pipeline: **Event-Driven (Callbacks)** and **Polling**.
+
+### Strategy 1: Event-Driven (Callbacks)
+
+Use `StatusTracker` callbacks to react immediately when events occur. This is best for:
+- Real-time dashboards (low latency)
+- Logging specific events (e.g., errors)
+- Triggering external actions (e.g., alerts)
+
+**Example:** `examples/rich_callback_dashboard.py` demonstrates this approach.
 
 ```python
-stats = pipeline.get_stats()
+async def on_status_change(event):
+    # React immediately to status changes
+    print(f"Item {event.item_id} is now {event.status}")
 
-print(f"Items processed: {stats.items_processed}")
-print(f"Items failed: {stats.items_failed}")
-print(f"Items in-flight: {stats.items_in_flight}")
-print(f"Queue sizes: {stats.queue_sizes}")
+tracker = StatusTracker(on_status_change=on_status_change)
+pipeline = Pipeline(stages=[...], status_tracker=tracker)
+await pipeline.run(items)
 ```
 
-### Real-Time Monitoring Example
+### Strategy 2: Polling (Loop)
+
+Run a separate loop to periodically check `pipeline.get_stats()` or `pipeline.get_dashboard_snapshot()`. This is best for:
+- Periodic metrics aggregation
+- Decoupled monitoring (UI runs at its own FPS)
+- Reducing overhead (batching updates)
+
+**Example:** `examples/rich_dashboard.py` demonstrates this approach.
 
 ```python
-import asyncio
-
-async def monitor_pipeline(pipeline):
+async def monitor_loop(pipeline):
     while True:
+        # Poll current state every second
         stats = pipeline.get_stats()
-        print(f"Progress: {stats.items_processed} processed, "
-              f"{stats.items_in_flight} in-flight")
+        print(f"Processed: {stats.items_processed}, In-Flight: {stats.items_in_flight}")
         await asyncio.sleep(1.0)
 
-# Run monitoring concurrently
 async with asyncio.TaskGroup() as tg:
-    tg.create_task(monitor_pipeline(pipeline))
-    results = await pipeline.run(items)
+    tg.create_task(monitor_loop(pipeline))
+    await pipeline.run(items)
 ```
 
 ## Feeding Data
