@@ -92,3 +92,44 @@ class DashboardSnapshot:
     worker_metrics: Dict[str, WorkerMetrics]
     pipeline_stats: PipelineStats
     timestamp: float
+
+
+@dataclass
+class StatusEvent:
+    """
+    Represents a status change event for an item in the pipeline.
+
+    Attributes:
+        item_id: Unique identifier for the item
+        stage: Name of the stage (None if not stage-specific)
+        status: Current status of the item
+        worker: Name of the worker processing the item (if applicable)
+        timestamp: Unix timestamp when the event occurred
+        metadata: Additional metadata about the event
+    """
+    item_id: Any
+    stage: str | None
+    status: StatusType
+    worker: str | None
+    timestamp: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def worker_id(self) -> int | None:
+        """
+        Extract worker ID from worker name.
+
+        Examples:
+            "ProcessBatch-W5" -> 5
+            "Fetch-W0" -> 0
+            None -> None
+
+        Returns:
+            Worker ID (0-indexed) or None if not available
+        """
+        if self.worker:
+            try:
+                return int(self.worker.split('-W')[-1])
+            except (ValueError, IndexError):
+                return None
+        return None

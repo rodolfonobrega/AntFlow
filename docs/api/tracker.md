@@ -76,6 +76,10 @@ You can provide these async callbacks to the `StatusTracker` constructor to reac
 | `on_task_retry` | `async def fn(event: TaskEvent)` | Triggered when a task fails but will be retried. |
 | `on_task_fail` | `async def fn(event: TaskEvent)` | Triggered when a task fails permanently (after all retries). |
 
+## Event Objects
+
+For detailed properties of `StatusEvent` and `TaskEvent`, please refer to the **[Types API](types.md)** documentation.
+
 ## Event Types
 
 For quick reference, here are the possible values for status and event types:
@@ -98,13 +102,7 @@ For quick reference, here are the possible values for status and event types:
 
 ## Class Reference
 
-### StatusEvent
 
-::: antflow.tracker.StatusEvent
-    options:
-      show_root_heading: true
-      show_source: false
-      members_order: source
 
 ### StatusTracker
 
