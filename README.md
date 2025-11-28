@@ -228,6 +228,11 @@ Track every item as it flows through your pipeline with **StatusTracker**. Get r
 ```python
 from antflow import Pipeline, Stage, StatusTracker
 
+# Mock tasks
+async def fetch(x): return x
+async def process(x): return x
+async def save(x): return x
+
 # 1. Define a callback for real-time updates
 async def log_event(event):
     print(f"Item {event.item_id}: {event.status} @ {event.stage}")
@@ -245,6 +250,7 @@ pipeline = Pipeline(
 )
 
 # 2. Run pipeline (logs will print in real-time)
+items = range(50)
 results = await pipeline.run(items)
 
 # 3. Get final statistics
