@@ -140,25 +140,7 @@ class TestIntegration:
         assert tracker_stats["completed"] == success_count["count"]
         assert tracker_stats["failed"] == failure_count["count"]
 
-    @pytest.mark.asyncio
-    async def test_dynamic_pipeline_modification(self):
-        """Test dynamically modifying pipeline structure."""
-        stage1 = Stage(name="Stage1", workers=1, tasks=[fetch_data])
 
-        pipeline = Pipeline(stages=[stage1])
-
-        stage2 = Stage(name="Stage2", workers=1, tasks=[process_data])
-        await pipeline.add_stage(stage2)
-
-        stage3 = Stage(name="Stage3", workers=1, tasks=[save_data])
-        await pipeline.add_stage(stage3)
-
-        results = await pipeline.run(range(5))
-
-        assert len(results) == 5
-        for result in results:
-            assert result.value['processed'] is True
-            assert result.value['saved'] is True
 
     @pytest.mark.asyncio
     async def test_large_scale_processing(self):

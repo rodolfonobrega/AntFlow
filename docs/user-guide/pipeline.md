@@ -264,29 +264,7 @@ results = await pipeline.run(items)
 # Results maintain input order
 ```
 
-## Dynamic Pipeline Modification
 
-### Adding Stages
-
-```python
-from antflow import Pipeline, Stage
-
-pipeline = Pipeline(stages=[stage1])
-
-# Add stage at the end
-await pipeline.add_stage(stage2)
-
-# Add stage at specific position
-await pipeline.add_stage(stage_middle, position=1)
-```
-
-**Note**: Can only modify pipeline before running.
-
-### Removing Stages
-
-```python
-await pipeline.remove_stage("StageName")
-```
 
 ## Monitoring and Metrics
 

@@ -242,41 +242,4 @@ class TestPipelineDashboard:
         assert len(updates) >= 2
 
 
-class TestDynamicPipelineWithTracking:
-    """Test that dynamic pipeline modifications update tracking."""
 
-    @pytest.mark.asyncio
-    async def test_add_stage_updates_tracking(self):
-        """Test that adding a stage updates worker tracking."""
-        stage1 = Stage(name="Stage1", workers=2, tasks=[simple_task])
-        pipeline = Pipeline(stages=[stage1])
-
-        initial_states = pipeline.get_worker_states()
-        assert len(initial_states) == 2
-
-        stage2 = Stage(name="Stage2", workers=3, tasks=[simple_task])
-        await pipeline.add_stage(stage2)
-
-        updated_states = pipeline.get_worker_states()
-        assert len(updated_states) == 5
-        assert "Stage2-W0" in updated_states
-        assert "Stage2-W1" in updated_states
-        assert "Stage2-W2" in updated_states
-
-    @pytest.mark.asyncio
-    async def test_remove_stage_updates_tracking(self):
-        """Test that removing a stage updates worker tracking."""
-        stage1 = Stage(name="Stage1", workers=2, tasks=[simple_task])
-        stage2 = Stage(name="Stage2", workers=3, tasks=[simple_task])
-        pipeline = Pipeline(stages=[stage1, stage2])
-
-        initial_states = pipeline.get_worker_states()
-        assert len(initial_states) == 5
-
-        await pipeline.remove_stage("Stage2")
-
-        updated_states = pipeline.get_worker_states()
-        assert len(updated_states) == 2
-        assert "Stage2-W0" not in updated_states
-        assert "Stage2-W1" not in updated_states
-        assert "Stage2-W2" not in updated_states
