@@ -76,33 +76,9 @@ You can provide these async callbacks to the `StatusTracker` constructor to reac
 | `on_task_retry` | `async def fn(event: TaskEvent)` | Triggered when a task fails but will be retried. |
 | `on_task_fail` | `async def fn(event: TaskEvent)` | Triggered when a task fails permanently (after all retries). |
 
-## Event Objects Structure
+## Event Objects
 
-When using callbacks, you will receive either a `StatusEvent` or a `TaskEvent`. Here are their properties:
-
-### StatusEvent Properties
-| Property | Type | Description |
-|----------|------|-------------|
-| `item_id` | `Any` | Unique identifier for the item. |
-| `stage` | `str` | Name of the stage where the event occurred. |
-| `status` | `str` | Current status (`queued`, `in_progress`, `completed`, `failed`). |
-| `worker` | `str` | Name of the worker (e.g., `Fetch-W0`). |
-| `timestamp` | `float` | Unix timestamp of the event. |
-| `metadata` | `dict` | Additional context (e.g., error details). |
-| `worker_id` | `int` | Helper to get the worker index (e.g., `0` from `Fetch-W0`). |
-
-### TaskEvent Properties
-| Property | Type | Description |
-|----------|------|-------------|
-| `item_id` | `Any` | Unique identifier for the item. |
-| `stage` | `str` | Name of the stage. |
-| `task_name` | `str` | Name of the specific task function. |
-| `worker` | `str` | Name of the worker processing the task. |
-| `event_type` | `str` | Type of event (`start`, `complete`, `retry`, `fail`). |
-| `attempt` | `int` | Current attempt number (1-indexed). |
-| `timestamp` | `float` | Unix timestamp of the event. |
-| `error` | `Exception` | Exception object if task failed or is retrying. |
-| `duration` | `float` | Time taken to execute (seconds), if completed/failed. |
+For detailed properties of `StatusEvent` and `TaskEvent`, please refer to the **[Types API](types.md)** documentation.
 
 ## Event Types
 
@@ -126,13 +102,7 @@ For quick reference, here are the possible values for status and event types:
 
 ## Class Reference
 
-### StatusEvent
 
-::: antflow.tracker.StatusEvent
-    options:
-      show_root_heading: true
-      show_source: false
-      members_order: source
 
 ### StatusTracker
 
