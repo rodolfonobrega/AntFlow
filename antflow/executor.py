@@ -15,6 +15,7 @@ logger = setup_logger(__name__)
 
 class WaitStrategy(Enum):
     """Strategy for waiting on multiple futures."""
+
     FIRST_COMPLETED = "FIRST_COMPLETED"
     FIRST_EXCEPTION = "FIRST_EXCEPTION"
     ALL_COMPLETED = "ALL_COMPLETED"
@@ -132,8 +133,7 @@ class AsyncExecutor:
         """Start worker tasks if not already started."""
         if not self._workers_started:
             self._worker_tasks = [
-                asyncio.create_task(self._worker(i))
-                for i in range(self.max_workers)
+                asyncio.create_task(self._worker(i)) for i in range(self.max_workers)
             ]
             self._workers_started = True
 
@@ -141,7 +141,9 @@ class AsyncExecutor:
         self,
         fn: Callable[..., Any],
         *args: Any,
-        **kwargs: Any
+        retries: int = 0,
+        retry_delay: float = 0.1,
+        **kwargs: Any,
     ) -> AsyncFuture:
         """
         Submit a task for execution.
@@ -149,6 +151,8 @@ class AsyncExecutor:
         Args:
             fn: Async callable to execute
             *args: Positional arguments for fn
+            retries: Number of retries on failure
+            retry_delay: Delay between retries in seconds
             **kwargs: Keyword arguments for fn
 
         Returns:
@@ -160,9 +164,20 @@ class AsyncExecutor:
         if self._shutdown:
             raise ExecutorShutdownError("Cannot submit tasks to a shutdown executor")
 
+        if retries > 0:
+            from tenacity import retry, stop_after_attempt, wait_fixed
+
+            @retry(stop=stop_after_attempt(retries + 1), wait=wait_fixed(retry_delay))
+            async def wrapped_fn(*a, **kw):
+                return await fn(*a, **kw)
+
+            task_fn = wrapped_fn
+        else:
+            task_fn = fn
+
         future = AsyncFuture(self._sequence_counter)
         self._sequence_counter += 1
-        self._queue.put_nowait((future, fn, args, kwargs))
+        self._queue.put_nowait((future, task_fn, args, kwargs))
 
         return future
 
@@ -170,7 +185,9 @@ class AsyncExecutor:
         self,
         fn: Callable[[T], Any],
         *iterables: Iterable[T],
-        timeout: float | None = None
+        timeout: float | None = None,
+        retries: int = 0,
+        retry_delay: float = 0.1,
     ) -> AsyncIterator[R]:
         """
         Map an async function over iterables, yielding results in input order.
@@ -179,6 +196,8 @@ class AsyncExecutor:
             fn: Async callable to map
             *iterables: Iterables to map over
             timeout: Maximum time to wait for each result
+            retries: Number of retries on failure
+            retry_delay: Delay between retries in seconds
 
         Yields:
             Results from fn applied to each input
@@ -194,18 +213,16 @@ class AsyncExecutor:
         futures = []
         for args in zip(*iterables):
             if len(args) == 1:
-                future = self.submit(fn, args[0])
+                future = self.submit(fn, args[0], retries=retries, retry_delay=retry_delay)
             else:
-                future = self.submit(fn, *args)
+                future = self.submit(fn, *args, retries=retries, retry_delay=retry_delay)
             futures.append(future)
 
         for future in futures:
             yield await future.result(timeout=timeout)
 
     async def as_completed(
-        self,
-        futures: list[AsyncFuture],
-        timeout: float | None = None
+        self, futures: list[AsyncFuture], timeout: float | None = None
     ) -> AsyncIterator[AsyncFuture]:
         """
         Yield futures as they complete.
@@ -224,15 +241,10 @@ class AsyncExecutor:
 
         async def wait_for_any():
             while pending:
-                done_tasks = [
-                    asyncio.create_task(f._done_event.wait())
-                    for f in pending
-                ]
+                done_tasks = [asyncio.create_task(f._done_event.wait()) for f in pending]
 
                 done, _ = await asyncio.wait(
-                    done_tasks,
-                    return_when=asyncio.FIRST_COMPLETED,
-                    timeout=timeout
+                    done_tasks, return_when=asyncio.FIRST_COMPLETED, timeout=timeout
                 )
 
                 if not done:
@@ -256,7 +268,7 @@ class AsyncExecutor:
         self,
         futures: Iterable[AsyncFuture[R]],
         timeout: float | None = None,
-        return_when: WaitStrategy = WaitStrategy.ALL_COMPLETED
+        return_when: WaitStrategy = WaitStrategy.ALL_COMPLETED,
     ) -> Tuple[Set[AsyncFuture[R]], Set[AsyncFuture[R]]]:
         """
         Wait for futures to complete with different strategies.
@@ -311,16 +323,13 @@ class AsyncExecutor:
                     break
 
             # Create wait tasks for pending futures
-            wait_tasks = {
-                asyncio.create_task(wait_for_event(f)): f
-                for f in pending
-            }
+            wait_tasks = {asyncio.create_task(wait_for_event(f)): f for f in pending}
 
             try:
                 completed_tasks, _ = await asyncio.wait(
                     wait_tasks.keys(),
                     timeout=remaining_timeout,
-                    return_when=asyncio.FIRST_COMPLETED
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 # Process completed futures
