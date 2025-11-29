@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     *   This status is emitted when an item fails in a stage and is queued for a retry (when using `retry="per_stage"`).
     *   This improves observability by distinguishing between initial queuing and retry queuing.
 *   **Example:** Updated `examples/rich_polling_dashboard.py` to visualize the `retrying` status with a distinct color.
+*   **Feature:** Added retry logic to `AsyncExecutor.map` and `AsyncExecutor.submit`.
+    *   `submit` now accepts `retries` and `retry_delay` arguments.
+    *   `map` now accepts `retries` and `retry_delay` arguments.
 
 ## [0.3.1] - 2025-11-27
 
