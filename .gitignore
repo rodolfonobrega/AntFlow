@@ -159,3 +159,6 @@ GITHUB_SETUP.md
 
 # Text files
 *.txt
+
+# Generated outputs
+outputs/
