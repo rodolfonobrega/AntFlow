@@ -118,6 +118,15 @@ async with AsyncExecutor(max_workers=3) as executor:
     except ValueError as e:
         print(f"Task failed: {e}")
         # Handle the error appropriately
+
+### Automatic Retries
+
+You can also configure automatic retries for `AsyncExecutor` tasks:
+
+```python
+# Retry 3 times with 0.1s delay
+future = executor.submit(failing_task, -5, retries=3, retry_delay=0.1)
+```
 ```
 
 ### In Pipeline

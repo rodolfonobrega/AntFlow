@@ -99,6 +99,38 @@ async with AsyncExecutor(max_workers=5) as executor:
         print(f"Got: {result}")
 ```
 
+## Automatic Retries
+
+`AsyncExecutor` supports automatic retries for failed tasks using `tenacity`. You can configure retries for both `submit()` and `map()`.
+
+### Retrying Submissions
+
+```python
+async with AsyncExecutor(max_workers=3) as executor:
+    # Retry up to 3 times (4 attempts total) with 0.5s delay
+    future = executor.submit(
+        flaky_task, 
+        arg, 
+        retries=3, 
+        retry_delay=0.5
+    )
+    result = await future.result()
+```
+
+### Retrying Map Operations
+
+```python
+async with AsyncExecutor(max_workers=5) as executor:
+    # Apply retry logic to all mapped tasks
+    async for result in executor.map(
+        flaky_task, 
+        items, 
+        retries=3, 
+        retry_delay=1.0
+    ):
+        print(result)
+```
+
 ## AsyncFuture
 
 The `AsyncFuture` object represents the result of an async task.
