@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2025-12-02
+
+### Added
+
+*   **Concurrency Control:**
+    *   Added `max_concurrency` parameter to `AsyncExecutor.map` to limit concurrent executions within a map operation.
+    *   Added `semaphore` parameter to `AsyncExecutor.submit` for manual concurrency control across tasks.
+    *   Added `task_concurrency_limits` to `Stage` class to limit concurrency of specific tasks within a pipeline stage.
+*   **Retry Improvements:**
+    *   Changed retry mechanism to use **exponential backoff** by default. `retry_delay` now serves as the initial multiplier.
+
 ## [0.3.4] - 2025-11-28
 
 ### Fixed
