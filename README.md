@@ -289,6 +289,7 @@ AntFlow has comprehensive documentation to help you get started and master advan
 
 ### 📚 User Guides
 - [AsyncExecutor Guide](https://rodolfonobrega.github.io/antflow/user-guide/executor/) - Using the concurrent.futures-style API
+- [Concurrency Control](https://rodolfonobrega.github.io/antflow/user-guide/concurrency/) - Managing concurrency limits and semaphores
 - [Pipeline Guide](https://rodolfonobrega.github.io/antflow/user-guide/pipeline/) - Building multi-stage workflows
 - [Dashboard Guide](https://rodolfonobrega.github.io/antflow/user-guide/dashboard/) - Real-time monitoring and dashboards
 - [Error Handling](https://rodolfonobrega.github.io/antflow/user-guide/error-handling/) - Managing failures and retries
