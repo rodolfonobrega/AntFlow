@@ -132,6 +132,45 @@ async with AsyncExecutor(max_workers=5) as executor:
         print(result)
 ```
 
+    result = await future.result()
+```
+
+## Concurrency Limits
+
+You can limit the number of concurrent executions for specific tasks, which is useful for rate limiting (e.g., max 50 concurrent API calls even with 1000 workers).
+
+### In `map()`
+
+Use `max_concurrency` to limit concurrent tasks within a map operation:
+
+```python
+async with AsyncExecutor(max_workers=100) as executor:
+    # Only 10 tasks will run at once
+    async for result in executor.map(api_call, items, max_concurrency=10):
+        print(result)
+```
+
+### In `submit()`
+
+Use `semaphore` to share a concurrency limit across multiple submit calls:
+
+```python
+import asyncio
+
+# Create a semaphore for rate limiting
+api_limit = asyncio.Semaphore(10)
+
+async with AsyncExecutor(max_workers=100) as executor:
+    futures = []
+    for item in items:
+        # Share the semaphore across tasks
+        f = executor.submit(api_call, item, semaphore=api_limit)
+        futures.append(f)
+    
+    # Wait for results
+    results = [await f.result() for f in futures]
+```
+
 ## AsyncFuture
 
 The `AsyncFuture` object represents the result of an async task.

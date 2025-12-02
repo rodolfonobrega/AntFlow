@@ -143,6 +143,7 @@ class AsyncExecutor:
         *args: Any,
         retries: int = 0,
         retry_delay: float = 0.1,
+        semaphore: asyncio.Semaphore | None = None,
         **kwargs: Any,
     ) -> AsyncFuture:
         """
@@ -153,6 +154,7 @@ class AsyncExecutor:
             *args: Positional arguments for fn
             retries: Number of retries on failure
             retry_delay: Delay between retries in seconds
+            semaphore: Optional semaphore to limit concurrency
             **kwargs: Keyword arguments for fn
 
         Returns:
@@ -163,6 +165,16 @@ class AsyncExecutor:
         """
         if self._shutdown:
             raise ExecutorShutdownError("Cannot submit tasks to a shutdown executor")
+
+        # Wrap function with semaphore if provided
+        if semaphore:
+            original_fn = fn
+
+            async def semaphore_wrapper(*a, **kw):
+                async with semaphore:
+                    return await original_fn(*a, **kw)
+
+            fn = semaphore_wrapper
 
         if retries > 0:
             from tenacity import retry, stop_after_attempt, wait_exponential
@@ -190,6 +202,7 @@ class AsyncExecutor:
         timeout: float | None = None,
         retries: int = 0,
         retry_delay: float = 0.1,
+        max_concurrency: int | None = None,
     ) -> AsyncIterator[R]:
         """
         Map an async function over iterables, yielding results in input order.
@@ -200,6 +213,7 @@ class AsyncExecutor:
             timeout: Maximum time to wait for each result
             retries: Number of retries on failure
             retry_delay: Delay between retries in seconds
+            max_concurrency: Maximum number of concurrent executions for this map call
 
         Yields:
             Results from fn applied to each input
@@ -212,12 +226,27 @@ class AsyncExecutor:
 
         await self._ensure_workers_started()
 
+        # Create semaphore if max_concurrency is specified
+        semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
+
         futures = []
         for args in zip(*iterables):
             if len(args) == 1:
-                future = self.submit(fn, args[0], retries=retries, retry_delay=retry_delay)
+                future = self.submit(
+                    fn,
+                    args[0],
+                    retries=retries,
+                    retry_delay=retry_delay,
+                    semaphore=semaphore,
+                )
             else:
-                future = self.submit(fn, *args, retries=retries, retry_delay=retry_delay)
+                future = self.submit(
+                    fn,
+                    *args,
+                    retries=retries,
+                    retry_delay=retry_delay,
+                    semaphore=semaphore,
+                )
             futures.append(future)
 
         for future in futures:
