@@ -192,10 +192,22 @@ async def on_task_fail(event: TaskEvent):
         await send_critical_alert(f"Database save failed for {event.item_id}")
 
 tracker = StatusTracker(
-    on_task_retry=on_task_retry,
-    on_task_fail=on_task_fail
+    # Limit specific tasks (e.g., API calls) to avoid rate limits
+    task_concurrency_limits={
+        "fetch_data": 5,  # Max 5 concurrent fetch_data calls
+        "process_data": 20 # Max 20 concurrent process_data calls
+    },
+    on_success=handle_success,
+    on_failure=handle_failure
 )
 
+### Task Concurrency Limits
+
+You can limit the concurrency of specific tasks within a stage using `task_concurrency_limits`. This is useful when you have a high number of workers (e.g., 50) but one specific task (like an API call) has a strict rate limit (e.g., 5 concurrent requests).
+
+- The limit applies **per task function name**.
+- Workers that cannot acquire a semaphore for the task will wait, freeing up resources if they were in an async wait state (though in the current implementation, they block the worker slot until the semaphore is acquired).
+- This ensures you don't exceed external system limits while keeping high throughput for other tasks.
 stage = Stage(
     name="ETL",
     tasks=[extract, transform, validate, save],  # Multiple tasks

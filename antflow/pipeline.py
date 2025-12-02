@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterable, Callable, Dict, List, Optional, Sequence
 
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -32,6 +32,7 @@ class Stage:
     """
     A stage in the pipeline that processes items through a sequence of tasks.
     """
+
     name: str
     workers: int
     tasks: Sequence[TaskFunc]
@@ -40,6 +41,7 @@ class Stage:
     task_wait_seconds: float = 1.0
     stage_attempts: int = 3
     unpack_args: bool = False
+    task_concurrency_limits: Dict[str, int] = field(default_factory=dict)
     on_success: Optional[Callable[[Any, Any, Dict[str, Any]], Any]] = None
     on_failure: Optional[Callable[[Any, Exception, Dict[str, Any]], Any]] = None
 
@@ -60,9 +62,7 @@ class Stage:
                 f"Stage '{self.name}' must have at least 1 worker, got {self.workers}"
             )
         if not self.tasks:
-            raise StageValidationError(
-                f"Stage '{self.name}' must have at least one task"
-            )
+            raise StageValidationError(f"Stage '{self.name}' must have at least one task")
         if self.task_attempts < 1:
             raise StageValidationError(
                 f"Stage '{self.name}' task_attempts must be at least 1, got {self.task_attempts}"
@@ -82,7 +82,7 @@ class Pipeline:
         self,
         stages: List[Stage],
         collect_results: bool = True,
-        status_tracker: Optional[StatusTracker] = None
+        status_tracker: Optional[StatusTracker] = None,
     ):
         """
         Initialize the pipeline.
@@ -119,7 +119,9 @@ class Pipeline:
 
         self._worker_states: Dict[str, WorkerState] = {}
         self._worker_metrics: Dict[str, WorkerMetrics] = {}
+        self._task_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
         self._initialize_worker_tracking()
+        self._initialize_semaphores()
 
     @property
     def results(self) -> List[PipelineResult]:
@@ -137,10 +139,7 @@ class Pipeline:
         Returns:
             [PipelineStats][antflow.types.PipelineStats] with current metrics
         """
-        queue_sizes = {
-            stage.name: self._queues[i].qsize()
-            for i, stage in enumerate(self.stages)
-        }
+        queue_sizes = {stage.name: self._queues[i].qsize() for i, stage in enumerate(self.stages)}
 
         items_in_flight = sum(queue_sizes.values())
 
@@ -148,7 +147,7 @@ class Pipeline:
             items_processed=self._items_processed,
             items_failed=self._items_failed,
             items_in_flight=items_in_flight,
-            queue_sizes=queue_sizes
+            queue_sizes=queue_sizes,
         )
 
     def get_worker_names(self) -> Dict[str, List[str]]:
@@ -176,9 +175,7 @@ class Pipeline:
         """
         worker_names = {}
         for stage in self.stages:
-            worker_names[stage.name] = [
-                f"{stage.name}-W{i}" for i in range(stage.workers)
-            ]
+            worker_names[stage.name] = [f"{stage.name}-W{i}" for i in range(stage.workers)]
         return worker_names
 
     def _initialize_worker_tracking(self) -> None:
@@ -188,15 +185,20 @@ class Pipeline:
                 worker_name = f"{stage.name}-W{i}"
 
                 self._worker_states[worker_name] = WorkerState(
-                    worker_name=worker_name,
-                    stage=stage.name,
-                    status="idle"
+                    worker_name=worker_name, stage=stage.name, status="idle"
                 )
 
                 self._worker_metrics[worker_name] = WorkerMetrics(
-                    worker_name=worker_name,
-                    stage=stage.name
+                    worker_name=worker_name, stage=stage.name
                 )
+
+    def _initialize_semaphores(self) -> None:
+        """Initialize semaphores for task concurrency limits."""
+        for stage in self.stages:
+            if stage.task_concurrency_limits:
+                self._task_semaphores[stage.name] = {}
+                for task_name, limit in stage.task_concurrency_limits.items():
+                    self._task_semaphores[stage.name][task_name] = asyncio.Semaphore(limit)
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
         """
@@ -250,7 +252,7 @@ class Pipeline:
             worker_states=self.get_worker_states(),
             worker_metrics=self.get_worker_metrics(),
             pipeline_stats=self.get_stats(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
     async def feed(self, items: Sequence[Any]) -> None:
@@ -266,11 +268,7 @@ class Pipeline:
             payload = self._prepare_payload(item)
             await q0.put((payload, 1))
             logger.debug(f"Enqueued item id={payload['id']}")
-            await self._emit_status(
-                payload['id'],
-                first_stage_name,
-                "queued"
-            )
+            await self._emit_status(payload["id"], first_stage_name, "queued")
 
     async def feed_async(self, items: AsyncIterable[Any]) -> None:
         """
@@ -285,11 +283,7 @@ class Pipeline:
             payload = self._prepare_payload(item)
             await q0.put((payload, 1))
             logger.debug(f"Enqueued item id={payload['id']}")
-            await self._emit_status(
-                payload['id'],
-                first_stage_name,
-                "queued"
-            )
+            await self._emit_status(payload["id"], first_stage_name, "queued")
 
     def _prepare_payload(self, item: Any) -> Dict[str, Any]:
         """
@@ -305,7 +299,7 @@ class Pipeline:
             payload = {
                 "id": item["id"],
                 "value": item.get("value", item),
-                "_sequence_id": self._sequence_counter
+                "_sequence_id": self._sequence_counter,
             }
             for k, v in item.items():
                 payload.setdefault(k, v)
@@ -313,7 +307,7 @@ class Pipeline:
             payload = {
                 "id": self._sequence_counter,
                 "value": item,
-                "_sequence_id": self._sequence_counter
+                "_sequence_id": self._sequence_counter,
             }
 
         self._sequence_counter += 1
@@ -351,9 +345,7 @@ class Pipeline:
                 name_prefix = stage.name
                 input_q = self._queues[stage_index]
                 output_q = (
-                    self._queues[stage_index + 1]
-                    if stage_index + 1 < len(self._queues)
-                    else None
+                    self._queues[stage_index + 1] if stage_index + 1 < len(self._queues) else None
                 )
 
                 for i in range(stage.workers):
@@ -369,8 +361,6 @@ class Pipeline:
             self._stop_event.set()
 
         return self.results
-
-
 
     async def shutdown(self) -> None:
         """Shut down the pipeline gracefully."""
@@ -400,7 +390,7 @@ class Pipeline:
         stage: str | None,
         status: str,
         worker: str | None = None,
-        metadata: Dict[str, Any] | None = None
+        metadata: Dict[str, Any] | None = None,
     ) -> None:
         """
         Emit status event if tracker is configured.
@@ -419,7 +409,7 @@ class Pipeline:
                 status=status,
                 worker=worker,
                 timestamp=time.time(),
-                metadata=metadata or {}
+                metadata=metadata or {},
             )
             await self._status_tracker._emit(event)
 
@@ -432,7 +422,7 @@ class Pipeline:
         event_type: str,
         attempt: int,
         error: Optional[Exception] = None,
-        duration: Optional[float] = None
+        duration: Optional[float] = None,
     ) -> None:
         """
         Emit task-level event if tracker is configured.
@@ -457,7 +447,7 @@ class Pipeline:
                 attempt=attempt,
                 timestamp=time.time(),
                 error=error,
-                duration=duration
+                duration=duration,
             )
             await self._status_tracker._emit_task_event(event)
 
@@ -495,17 +485,10 @@ class Pipeline:
             try:
                 logger.debug(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt}")
 
-                await self._emit_status(
-                    item_id,
-                    stage.name,
-                    "in_progress",
-                    worker=name
-                )
+                await self._emit_status(item_id, stage.name, "in_progress", worker=name)
 
                 if stage.retry == "per_task":
-                    result_value = await self._run_per_task(
-                        stage, payload["value"], name, item_id
-                    )
+                    result_value = await self._run_per_task(stage, payload["value"], name, item_id)
                 else:
                     result_value = await self._run_per_stage(
                         stage, payload["value"], name, item_id, payload, attempt, input_q
@@ -515,12 +498,7 @@ class Pipeline:
 
                 payload["value"] = result_value
 
-                await self._emit_status(
-                    item_id,
-                    stage.name,
-                    "completed",
-                    worker=name
-                )
+                await self._emit_status(item_id, stage.name, "completed", worker=name)
 
                 if output_q is not None:
                     await output_q.put((payload, 1))
@@ -529,11 +507,7 @@ class Pipeline:
                         self.stages[stage_index + 1].name if is_not_last_stage else None
                     )
                     if next_stage_name:
-                        await self._emit_status(
-                            item_id,
-                            next_stage_name,
-                            "queued"
-                        )
+                        await self._emit_status(item_id, next_stage_name, "queued")
                 else:
                     if self.collect_results:
                         # Extract known fields
@@ -542,16 +516,16 @@ class Pipeline:
                         seq_id = payload["_sequence_id"]
                         # Everything else goes to metadata
                         meta = {
-                            k: v for k, v in payload.items()
+                            k: v
+                            for k, v in payload.items()
                             if k not in ("id", "value", "_sequence_id")
                         }
-                        
-                        self._results.append(PipelineResult(
-                            id=res_id,
-                            value=res_value,
-                            sequence_id=seq_id,
-                            metadata=meta
-                        ))
+
+                        self._results.append(
+                            PipelineResult(
+                                id=res_id, value=res_value, sequence_id=seq_id, metadata=meta
+                            )
+                        )
 
                 if stage.on_success:
                     try:
@@ -583,10 +557,7 @@ class Pipeline:
                 self._worker_metrics[name].last_active = time.time()
 
                 await self._emit_status(
-                    item_id,
-                    stage.name,
-                    "failed",
-                    metadata={"error": str(original_error)}
+                    item_id, stage.name, "failed", metadata={"error": str(original_error)}
                 )
 
                 if stage.on_failure:
@@ -629,12 +600,10 @@ class Pipeline:
 
         for idx, task in enumerate(stage.tasks):
             task_name = task.__name__
-            wrapped = self._wrap_with_tenacity(
-                task, stage, worker_name, item_id, task_name
-            )
+            wrapped = self._wrap_with_tenacity(task, stage, worker_name, item_id, task_name)
 
             logger.debug(
-                f"[{worker_name}] START task {idx+1}/{len(stage.tasks)}={task_name} id={item_id}"
+                f"[{worker_name}] START task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
             )
 
             try:
@@ -649,7 +618,7 @@ class Pipeline:
                     current = await wrapped(current)
 
                 logger.debug(
-                    f"[{worker_name}] END task {idx+1}/{len(stage.tasks)}={task_name} id={item_id}"
+                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
                 )
 
             except Exception as e:
@@ -694,22 +663,30 @@ class Pipeline:
                 task_name = task.__name__
 
                 logger.debug(
-                    f"[{worker_name}] START task {idx+1}/{len(stage.tasks)}="
+                    f"[{worker_name}] START task {idx + 1}/{len(stage.tasks)}="
                     f"{task_name} id={item_id}"
                 )
 
                 if stage.unpack_args:
                     if isinstance(current, dict):
-                        current = await task(**current)
+                        coro = task(**current)
                     elif isinstance(current, (list, tuple)):
-                        current = await task(*current)
+                        coro = task(*current)
                     else:
-                        current = await task(current)
+                        coro = task(current)
                 else:
-                    current = await task(current)
+                    coro = task(current)
+
+                # Acquire semaphore if limit exists
+                semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
+                if semaphore:
+                    async with semaphore:
+                        current = await coro
+                else:
+                    current = await coro
 
                 logger.debug(
-                    f"[{worker_name}] END task {idx+1}/{len(stage.tasks)}={task_name} id={item_id}"
+                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
                 )
 
             return current
@@ -729,11 +706,7 @@ class Pipeline:
                     item_id,
                     stage.name,
                     "retrying",
-                    metadata={
-                        "attempt": attempt + 1,
-                        "retry": True,
-                        "error": str(original_error)
-                    }
+                    metadata={"attempt": attempt + 1, "retry": True, "error": str(original_error)},
                 )
 
                 return None
@@ -746,10 +719,7 @@ class Pipeline:
                 self._items_failed += 1
 
                 await self._emit_status(
-                    item_id,
-                    stage.name,
-                    "failed",
-                    metadata={"error": str(original_error)}
+                    item_id, stage.name, "failed", metadata={"error": str(original_error)}
                 )
 
                 return None
@@ -778,8 +748,7 @@ class Pipeline:
         attempt_counter = {"count": 0}
 
         @retry(
-            stop=stop_after_attempt(stage.task_attempts),
-            wait=wait_fixed(stage.task_wait_seconds)
+            stop=stop_after_attempt(stage.task_attempts), wait=wait_fixed(stage.task_wait_seconds)
         )
         async def wrapped(*args: Any, **kwargs: Any) -> Any:
             attempt_counter["count"] += 1
@@ -792,11 +761,18 @@ class Pipeline:
                 task_name=task_name,
                 worker=worker_name,
                 event_type="start",
-                attempt=current_attempt
+                attempt=current_attempt,
             )
 
             try:
-                result = await task(*args, **kwargs)
+                # Acquire semaphore if limit exists
+                semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
+                if semaphore:
+                    async with semaphore:
+                        result = await task(*args, **kwargs)
+                else:
+                    result = await task(*args, **kwargs)
+
                 duration = time.time() - start_time
 
                 await self._emit_task_event(
@@ -806,7 +782,7 @@ class Pipeline:
                     worker=worker_name,
                     event_type="complete",
                     attempt=current_attempt,
-                    duration=duration
+                    duration=duration,
                 )
 
                 return result
@@ -828,7 +804,7 @@ class Pipeline:
                         event_type="retry",
                         attempt=current_attempt,
                         error=e,
-                        duration=duration
+                        duration=duration,
                     )
                 else:
                     await self._emit_task_event(
@@ -839,7 +815,7 @@ class Pipeline:
                         event_type="fail",
                         attempt=current_attempt,
                         error=e,
-                        duration=duration
+                        duration=duration,
                     )
 
                 raise

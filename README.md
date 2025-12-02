@@ -200,8 +200,14 @@ async def save(x):
 
 async def main():
     # Define stages with different worker counts
-    fetch_stage = Stage(name="Fetch", workers=10, tasks=[fetch])
-    process_stage = Stage(name="Process", workers=5, tasks=[process])
+    fetch_stage = Stage(name="Fetch",        workers=5,
+        tasks=[fetch_data, process_data],
+        # Limit specific tasks to avoid rate limits
+        task_concurrency_limits={
+            "fetch_data": 2  # Only 2 concurrent fetch_data calls
+        }
+    )
+    process_stage = Stage(name="Process", workers=5, tasks=[process_data])
     save_stage = Stage(name="Save", workers=3, tasks=[save])
 
     # Build pipeline
