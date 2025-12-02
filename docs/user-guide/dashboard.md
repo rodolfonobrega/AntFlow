@@ -359,6 +359,14 @@ asyncio.run(main())
 - **Events are async**: Won't slow down pipeline
 - **Automatic monitoring**: Minimal overhead (<1% typically)
 
+## Examples
+
+See the [examples/](examples/) directory for complete dashboard implementations:
+
+- **[rich_polling_dashboard.py](../examples/index.md#dashboards)**: Polling-based terminal dashboard (Recommended)
+- **[rich_callback_dashboard.py](../examples/index.md#dashboards)**: Event-driven terminal dashboard
+- **[dashboard_websocket.py](../examples/index.md#dashboards)**: WebSocket server for web UIs
+
 ## API Reference
 
 See the [API documentation](../api/index.md) for complete details on:

@@ -31,6 +31,7 @@ This directory contains a comprehensive list of example scripts available in the
 | Example | Description |
 |---------|-------------|
 | **[rich_polling_dashboard.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/rich_polling_dashboard.py)** | **Recommended**: A beautiful, real-time terminal dashboard using the `rich` library (Polling approach). |
+| **[rich_callback_dashboard.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/rich_callback_dashboard.py)** | Event-driven dashboard using callbacks for immediate updates. |
 | **[dashboard_websocket.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/dashboard_websocket.py)** | Example of serving pipeline metrics over a WebSocket for web dashboards. |
 
 ## Detailed Guides
