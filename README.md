@@ -167,9 +167,10 @@ async def process_item(x):
 
 async def main():
     async with AsyncExecutor(max_workers=10) as executor:
-        # Using map() for parallel processing
+        # Using map() for parallel processing with automatic retry
         results = []
-        async for result in executor.map(process_item, range(100)):
+        # retries=3 means it will try up to 4 times total (1 initial + 3 retries)
+        async for result in executor.map(process_item, range(100), retries=3):
             results.append(result)
         print(f"Processed {len(results)} items")
 
