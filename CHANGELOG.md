@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2025-12-02
+
+### Documentation
+
+*   Added dedicated **Concurrency Control Guide** (`docs/user-guide/concurrency.md`).
+*   Fixed incorrect example in `pipeline.md` where `task_concurrency_limits` was placed in `StatusTracker`.
+*   Updated `executor.md` to link to the new concurrency guide.
+
 ## [0.3.5] - 2025-12-02
 
 ### Added
