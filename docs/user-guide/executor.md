@@ -137,7 +137,9 @@ async with AsyncExecutor(max_workers=5) as executor:
 
 ## Concurrency Limits
 
-You can limit the number of concurrent executions for specific tasks, which is useful for rate limiting (e.g., max 50 concurrent API calls even with 1000 workers).
+You can limit the number of concurrent executions for specific tasks, which is useful for rate limiting.
+
+For a detailed overview of all concurrency options, see the [Concurrency Control Guide](concurrency.md).
 
 ### In `map()`
 
