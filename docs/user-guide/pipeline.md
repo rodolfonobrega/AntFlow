@@ -593,3 +593,59 @@ asyncio.run(main())
 - Always set up `on_failure` callbacks for production
 - Log failed items for later retry/analysis
 - Monitor `items_failed` metric
+
+## Advanced Internals
+
+> [!WARNING]
+> This section covers internal implementation details. These APIs are protected (`_prefix`) and may change between minor versions. Use them with caution when building custom subclasses.
+
+### Internal Queue Structure (`_queues`)
+
+AntFlow manages data flow between stages using a list of internal queues, accessible via `self._queues`.
+
+*   **Type**: `List[asyncio.PriorityQueue]`
+*   **Indexing**: `_queues[i]` corresponds to `stages[i]`.
+*   **Item Structure**: Items are stored as tuples to ensure correct priority ordering and FIFO stability:
+    ```python
+    (priority, sequence_id, (payload, attempt))
+    ```
+    *   **priority** (`int`): Lower number = higher priority.
+    *   **sequence_id** (`int`): Monotonically increasing counter to ensure FIFO order for same-priority items.
+    *   **payload** (`dict`): The internal item wrapper (see below).
+    *   **attempt** (`int`): Current retry attempt number (1-indexed).
+
+### Payload Structure (`_prepare_payload`)
+
+When items enter the pipeline (via `feed` or `run`), they are wrapped in an internal dictionary structure to track metadata and ensure unique identification. The `_prepare_payload(item)` method handles this normalization.
+
+**Internal Payload Format:**
+```python
+{
+    "id": Any,          # Unique identifier (extracted from dict or generated)
+    "value": Any,       # The actual data being processed
+    "_sequence_id": int # Global sequence ID for result ordering
+}
+```
+
+*   **ID Extraction**:
+    *   If item is a `dict` and has an "id" key, that is used.
+    *   Otherwise, the item's index in the input iterable is used as the ID.
+*   **Value Extraction**:
+    *   If item is a `dict` and has a "value" key, that is used.
+    *   Otherwise, the item itself is used as the value.
+
+**Example Override:**
+If you need custom ID generation logic, you can override `_prepare_payload` in a subclass:
+
+```python
+class CustomPipeline(Pipeline):
+    def _prepare_payload(self, item):
+        # Custom logic: use 'uuid' field as ID if present
+        if isinstance(item, dict) and 'uuid' in item:
+            return {
+                "id": item['uuid'], 
+                "value": item, 
+                "_sequence_id": self._msg_counter
+            }
+        return super()._prepare_payload(item)
+```
