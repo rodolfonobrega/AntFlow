@@ -64,6 +64,8 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 - Chain operations with configurable worker pools per stage
 - Each stage runs independently
 - Data flows automatically between stages
+- **Priority Queues**: Assign priority to items to bypass sequential processing (NEW)
+- **Interactive Control**: Resume pipelines and inject items into any stage (NEW)
 
 ### 💪 **Built-in Resilience**
 - Per-task retry with exponential backoff
