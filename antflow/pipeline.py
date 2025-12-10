@@ -115,6 +115,7 @@ class Pipeline:
         self._items_processed = 0
         self._items_failed = 0
         self._worker_tasks: List[asyncio.Task] = []
+        self._runner_task: Optional[asyncio.Task] = None
         self._shutdown = False
 
         self._worker_states: Dict[str, WorkerState] = {}
@@ -255,35 +256,64 @@ class Pipeline:
             timestamp=time.time(),
         )
 
-    async def feed(self, items: Sequence[Any]) -> None:
+    async def feed(self, items: Sequence[Any], target_stage: Optional[str] = None) -> None:
         """
-        Feed items into the first stage of the pipeline.
+        Feed items into a specific stage of the pipeline.
 
         Args:
             items: Sequence of items to process
+            target_stage: Name of the stage to inject items into. 
+                         If None, feeds into the first stage.
+        
+        Raises:
+            ValueError: If target_stage is provided but not found.
         """
-        q0 = self._queues[0]
-        first_stage_name = self.stages[0].name if self.stages else None
+        if target_stage is None:
+            q = self._queues[0]
+            stage_name = self.stages[0].name if self.stages else None
+        else:
+            try:
+                # Find stage index by name
+                stage_idx = next(i for i, s in enumerate(self.stages) if s.name == target_stage)
+                q = self._queues[stage_idx]
+                stage_name = target_stage
+            except StopIteration:
+                raise ValueError(f"Stage '{target_stage}' not found in pipeline")
+
         for item in items:
             payload = self._prepare_payload(item)
-            await q0.put((payload, 1))
-            logger.debug(f"Enqueued item id={payload['id']}")
-            await self._emit_status(payload["id"], first_stage_name, "queued")
+            await q.put((payload, 1))
+            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name}")
+            await self._emit_status(payload["id"], stage_name, "queued")
 
-    async def feed_async(self, items: AsyncIterable[Any]) -> None:
+    async def feed_async(self, items: AsyncIterable[Any], target_stage: Optional[str] = None) -> None:
         """
-        Feed items from an async iterable into the first stage.
+        Feed items from an async iterable into a specific stage.
 
         Args:
             items: Async iterable of items to process
+            target_stage: Name of the stage to inject items into.
+                         If None, feeds into the first stage.
+
+        Raises:
+            ValueError: If target_stage is provided but not found.
         """
-        q0 = self._queues[0]
-        first_stage_name = self.stages[0].name if self.stages else None
+        if target_stage is None:
+            q = self._queues[0]
+            stage_name = self.stages[0].name if self.stages else None
+        else:
+            try:
+                stage_idx = next(i for i, s in enumerate(self.stages) if s.name == target_stage)
+                q = self._queues[stage_idx]
+                stage_name = target_stage
+            except StopIteration:
+                raise ValueError(f"Stage '{target_stage}' not found in pipeline")
+
         async for item in items:
             payload = self._prepare_payload(item)
-            await q0.put((payload, 1))
-            logger.debug(f"Enqueued item id={payload['id']}")
-            await self._emit_status(payload["id"], first_stage_name, "queued")
+            await q.put((payload, 1))
+            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name}")
+            await self._emit_status(payload["id"], stage_name, "queued")
 
     def _prepare_payload(self, item: Any) -> Dict[str, Any]:
         """
@@ -313,57 +343,101 @@ class Pipeline:
         self._sequence_counter += 1
         return payload
 
+    async def start(self) -> None:
+        """
+        Start the pipeline workers in the background.
+        
+        This method initializes the worker pool and starts processing items immediately
+        as they are available in the queues. Use `feed()` to add items.
+        
+        Raises:
+            PipelineError: If pipeline is already running
+        """
+        if self._runner_task and not self._runner_task.done():
+            raise PipelineError("Pipeline is already running")
+            
+        self._stop_event.clear()
+        self._shutdown = False
+        self._worker_tasks = []
+        self._runner_task = asyncio.create_task(self._backend_runner())
+    
+    async def join(self) -> None:
+        """
+        Wait for all enqueued items to be processed and stop workers.
+        
+        This method:
+        1. Waits for all queues to be empty (all items processed)
+        2. Signals workers to stop
+        3. Waits for the worker pool to shutdown
+        """
+        if not self._runner_task:
+            return
+
+        # Wait for all queues to automatically join (empty)
+        # Note: If a worker crashes, the queue might not join properly without
+        # careful error handling, but queue.join() waits for task_done() calls.
+        logger.debug("Waiting for queues to drain...")
+        for q in self._queues:
+            await q.join()
+            
+        logger.debug("Queues drained, signaling stop...")
+        self._stop_event.set()
+        
+        if self._runner_task:
+            await self._runner_task
+            self._runner_task = None
+            
+    async def _backend_runner(self) -> None:
+        """Internal runner that manages the TaskGroup and workers."""
+        try:
+            async with TaskGroup() as tg:
+                for stage_index, stage in enumerate(self.stages):
+                    name_prefix = stage.name
+                    input_q = self._queues[stage_index]
+                    output_q = (
+                        self._queues[stage_index + 1] if stage_index + 1 < len(self._queues) else None
+                    )
+
+                    for i in range(stage.workers):
+                        worker_name = f"{name_prefix}-W{i}"
+                        task = tg.create_task(
+                            self._stage_worker(worker_name, stage_index, stage, input_q, output_q)
+                        )
+                        self._worker_tasks.append(task)
+                        
+                # Wait for stop signal
+                # Workers themselves monitor stop_event, so we just wait for them to finish
+                # which happens when stop_event is set AND queues are empty (per _stage_worker logic)
+                # TaskGroup will wait for all tasks to complete upon exit.
+                
+        except Exception as e:
+            logger.error(f"Pipeline backend runner failed: {e}")
+            raise
+
     async def run(self, items: Sequence[Any]) -> List[PipelineResult]:
         """
         Run the pipeline end-to-end with the given items.
+        
+        This is a convenience wrapper around `start()`, `feed()`, and `join()`.
 
         Args:
-            items: Items to process through the pipeline. Can be a list of values or dictionaries.
+            items: Items to process through the pipeline.
 
         Returns:
-            List of [PipelineResult][antflow.types.PipelineResult] objects, sorted by input sequence.
-            Each result contains:
-            - `id`: The item's unique identifier
-            - `value`: The final processed output
-            - `metadata`: Dictionary of any other keys from the original input
-            - `sequence_id`: Internal sequence number
-
-            Example:
-                ```python
-                # Input: [{"id": "a", "value": 1, "meta": "x"}, {"id": "b", "value": 2}]
-                # Output:
-                # [
-                #     PipelineResult(id="a", value=10, metadata={"meta": "x"}, sequence_id=0),
-                #     PipelineResult(id="b", value=20, metadata={}, sequence_id=1)
-                # ]
-                ```
+            List of [PipelineResult][antflow.types.PipelineResult] objects.
         """
+        await self.start()
         await self.feed(items)
-
-        async with TaskGroup() as tg:
-            for stage_index, stage in enumerate(self.stages):
-                name_prefix = stage.name
-                input_q = self._queues[stage_index]
-                output_q = (
-                    self._queues[stage_index + 1] if stage_index + 1 < len(self._queues) else None
-                )
-
-                for i in range(stage.workers):
-                    worker_name = f"{name_prefix}-W{i}"
-                    task = tg.create_task(
-                        self._stage_worker(worker_name, stage_index, stage, input_q, output_q)
-                    )
-                    self._worker_tasks.append(task)
-
-            for q in self._queues:
-                await q.join()
-
-            self._stop_event.set()
-
+        await self.join()
         return self.results
 
     async def shutdown(self) -> None:
-        """Shut down the pipeline gracefully."""
+        """
+        Shut down the pipeline gracefully or forcefully.
+        
+        If queues are not empty, this might leave items unprocessed depending on
+        how workers react to stop_event.
+        """
         if self._shutdown:
             return
 
@@ -371,8 +445,18 @@ class Pipeline:
         self._shutdown = True
         self._stop_event.set()
 
-        if self._worker_tasks:
-            await asyncio.gather(*self._worker_tasks, return_exceptions=True)
+        if self._runner_task:
+            # If we want to force cancel, we would cancel the runner task.
+            # But graceful shutdown prefers letting them finish current item.
+            # The workers check stop_event loop.
+            try:
+                await self._runner_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+            finally:
+                self._runner_task = None
 
         logger.debug("Pipeline shutdown complete")
 

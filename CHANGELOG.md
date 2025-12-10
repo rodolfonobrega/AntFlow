@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.6] - 2025-12-02
+## [0.4.0] - 2025-12-10
+
+### Added
+
+*   **Feature: Interactive Pipeline Lifecycle**
+    *   Added `Pipeline.start()`: Initializes and starts workers without blocking.
+    *   Added `Pipeline.join()`: Waits for all items to be processed and shuts down.
+    *   Updated `Pipeline.feed()`: Now accepts a `target_stage` argument to inject items directly into specific stages.
+    *   **Resume Capability:** The combination of these features allows users to "resume" pipelines by injecting items into the specific stages where they left off.
+*   **Documentation:** Added "Interactive Execution" section to `docs/user-guide/pipeline.md` explaining the new workflow.
+*   **Example:** Added `examples/resume_checkpoint.py` demonstrating how to implement a resume/checkpoint system.
+
 
 ### Documentation
 
