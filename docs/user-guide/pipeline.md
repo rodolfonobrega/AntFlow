@@ -44,6 +44,30 @@ pipeline = Pipeline(stages=[fetch_stage, process_stage])
 results = await pipeline.run(range(10))
 ```
 
+### Interactive Execution
+
+For more control, you can split execution into `start`, `feed`, and `join` steps. This allows you to inject items dynamically while the pipeline is running:
+
+```python
+# Start background workers
+await pipeline.start()
+
+# Feed initial batch to first stage (default)
+await pipeline.feed(batch_1)
+
+# Do other work...
+
+# Inject items directly into a specific stage (e.g., resuming from a checkpoint)
+# This item will skip previous stages and start processing at 'ProcessStage'
+await pipeline.feed(recovered_items, target_stage="ProcessStage")
+
+# Wait for completion
+await pipeline.join()
+
+# Access results
+print(pipeline.results)
+```
+
 ### Multiple Tasks per Stage
 
 A stage can have multiple tasks that execute sequentially for each item:
