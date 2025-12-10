@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2025-12-10
+## [0.5.0] - 2025-12-10
+
+### ⚠ BREAKING CHANGES
+
+*   **Internal Queue Structure:** The pipeline now uses `asyncio.PriorityQueue` instead of `asyncio.Queue`.
+    *   Items in the queue are now tuples `(priority, sequence, item)`.
+    *   Subclasses accessing `_queues` directly will need to adapt.
+
+### Added
+
+*   **Feature: Priority Queues:**
+    *   `Pipeline.feed()` and `Pipeline.feed_async()` now accept a `priority` parameter (int).
+    *   Default priority is 100. Lower numbers = Higher Priority.
+    *   Allows urgent items to "jump the line" of waiting tasks.
+*   **Example:** Added `examples/priority_demo.py`.
+
 
 ### Added
 

@@ -109,7 +109,8 @@ class Pipeline:
         self._status_tracker = status_tracker
 
         self._stop_event = asyncio.Event()
-        self._queues: List[asyncio.Queue] = [asyncio.Queue() for _ in stages]
+        self._queues: List[asyncio.PriorityQueue] = [asyncio.PriorityQueue() for _ in stages]
+        self._msg_counter = 0
         self._results: List[PipelineResult] = []
         self._sequence_counter = 0
         self._items_processed = 0
@@ -256,7 +257,12 @@ class Pipeline:
             timestamp=time.time(),
         )
 
-    async def feed(self, items: Sequence[Any], target_stage: Optional[str] = None) -> None:
+    async def feed(
+        self, 
+        items: Sequence[Any], 
+        target_stage: Optional[str] = None,
+        priority: int = 100
+    ) -> None:
         """
         Feed items into a specific stage of the pipeline.
 
@@ -264,6 +270,7 @@ class Pipeline:
             items: Sequence of items to process
             target_stage: Name of the stage to inject items into. 
                          If None, feeds into the first stage.
+            priority: Priority level (lower = higher priority). Default 100.
         
         Raises:
             ValueError: If target_stage is provided but not found.
@@ -282,11 +289,21 @@ class Pipeline:
 
         for item in items:
             payload = self._prepare_payload(item)
-            await q.put((payload, 1))
-            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name}")
+            # (priority, sequence, data)
+            # We use _msg_counter to ensure stability (FIFO for same priority)
+            seq = self._msg_counter
+            self._msg_counter += 1
+            await q.put((priority, seq, (payload, 1)))
+            
+            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name} prio={priority}")
             await self._emit_status(payload["id"], stage_name, "queued")
 
-    async def feed_async(self, items: AsyncIterable[Any], target_stage: Optional[str] = None) -> None:
+    async def feed_async(
+        self, 
+        items: AsyncIterable[Any], 
+        target_stage: Optional[str] = None,
+        priority: int = 100
+    ) -> None:
         """
         Feed items from an async iterable into a specific stage.
 
@@ -294,6 +311,7 @@ class Pipeline:
             items: Async iterable of items to process
             target_stage: Name of the stage to inject items into.
                          If None, feeds into the first stage.
+            priority: Priority level (lower = higher priority). Default 100.
 
         Raises:
             ValueError: If target_stage is provided but not found.
@@ -311,8 +329,11 @@ class Pipeline:
 
         async for item in items:
             payload = self._prepare_payload(item)
-            await q.put((payload, 1))
-            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name}")
+            seq = self._msg_counter
+            self._msg_counter += 1
+            await q.put((priority, seq, (payload, 1)))
+
+            logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name} prio={priority}")
             await self._emit_status(payload["id"], stage_name, "queued")
 
     def _prepare_payload(self, item: Any) -> Dict[str, Any]:
@@ -555,7 +576,10 @@ class Pipeline:
         """
         while not self._stop_event.is_set() or not input_q.empty():
             try:
-                payload, attempt = await asyncio.wait_for(input_q.get(), timeout=0.1)
+                # Unpack priority item
+                # (priority, sequence, (payload, attempt))
+                prio_item = await asyncio.wait_for(input_q.get(), timeout=0.1)
+                priority, seq_in, (payload, attempt) = prio_item
             except asyncio.TimeoutError:
                 continue
 
@@ -567,7 +591,7 @@ class Pipeline:
             self._worker_states[name].processing_since = start_time
 
             try:
-                logger.debug(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt}")
+                logger.debug(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt} prio={priority}")
 
                 await self._emit_status(item_id, stage.name, "in_progress", worker=name)
 
@@ -575,7 +599,7 @@ class Pipeline:
                     result_value = await self._run_per_task(stage, payload["value"], name, item_id)
                 else:
                     result_value = await self._run_per_stage(
-                        stage, payload["value"], name, item_id, payload, attempt, input_q
+                        stage, payload["value"], name, item_id, payload, attempt, input_q, priority
                     )
                     if result_value is None:
                         continue
@@ -585,7 +609,11 @@ class Pipeline:
                 await self._emit_status(item_id, stage.name, "completed", worker=name)
 
                 if output_q is not None:
-                    await output_q.put((payload, 1))
+                    # Propagate priority, use new sequence number for stability in next queue
+                    seq_out = self._msg_counter
+                    self._msg_counter += 1
+                    await output_q.put((priority, seq_out, (payload, 1)))
+
                     is_not_last_stage = stage_index + 1 < len(self.stages)
                     next_stage_name = (
                         self.stages[stage_index + 1].name if is_not_last_stage else None
@@ -724,6 +752,7 @@ class Pipeline:
         payload: Dict[str, Any],
         attempt: int,
         input_q: asyncio.Queue,
+        priority: int,
     ) -> Optional[Any]:
         """
         Execute stage tasks with per-stage retry strategy.
@@ -736,6 +765,7 @@ class Pipeline:
             payload: Full payload dict
             attempt: Current attempt number
             input_q: Input queue for re-queueing
+            priority: Priority level
 
         Returns:
             Final value if successful, None if retried or failed
@@ -784,7 +814,10 @@ class Pipeline:
                     f"attempt={attempt} error={original_error}"
                 )
 
-                await input_q.put((payload, attempt + 1))
+                # Re-queue with same priority (or could boost it here)
+                seq_retry = self._msg_counter
+                self._msg_counter += 1
+                await input_q.put((priority, seq_retry, (payload, attempt + 1)))
 
                 await self._emit_status(
                     item_id,

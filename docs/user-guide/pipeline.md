@@ -466,6 +466,26 @@ See the [Worker Tracking Guide](worker-tracking.md) for detailed examples includ
 - Load balancing monitoring
 - Error tracking by worker
 
+## Priority Queues
+
+AntFlow uses **Priority Queues** internally. You can assign a priority level to items when feeding them into the pipeline.
+Lower numbers indicate higher priority (processed first). The default priority is `100`.
+
+- Items with the same priority are processed in FIFO order.
+- Priority is preserved across stages (unless a custom `feed` injects with different priority).
+- Retries (per-task or per-stage) currently preserve the original priority.
+
+```python
+# Expedited items (Priority 10)
+await pipeline.feed(vip_items, priority=10)
+
+# Normal items (Priority 100)
+await pipeline.feed(regular_items)
+
+# Background/Low priority (Priority 500)
+await pipeline.feed(maintenance_items, priority=500)
+```
+
 ## Complete ETL Example
 
 ```python
