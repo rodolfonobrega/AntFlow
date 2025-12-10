@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2025-12-10
+## [0.4.0] - 2025-12-10
 
 ### ⚠ BREAKING CHANGES
 
@@ -15,29 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-*   **Feature: Priority Queues:**
-    *   `Pipeline.feed()` and `Pipeline.feed_async()` now accept a `priority` parameter (int).
-    *   Default priority is 100. Lower numbers = Higher Priority.
-    *   Allows urgent items to "jump the line" of waiting tasks.
-*   **Example:** Added `examples/priority_demo.py`.
-
-
-### Added
-
 *   **Feature: Interactive Pipeline Lifecycle**
     *   Added `Pipeline.start()`: Initializes and starts workers without blocking.
     *   Added `Pipeline.join()`: Waits for all items to be processed and shuts down.
     *   Updated `Pipeline.feed()`: Now accepts a `target_stage` argument to inject items directly into specific stages.
     *   **Resume Capability:** The combination of these features allows users to "resume" pipelines by injecting items into the specific stages where they left off.
-*   **Documentation:** Added "Interactive Execution" section to `docs/user-guide/pipeline.md` explaining the new workflow.
-*   **Example:** Added `examples/resume_checkpoint.py` demonstrating how to implement a resume/checkpoint system.
-
-
-### Documentation
-
-*   Added dedicated **Concurrency Control Guide** (`docs/user-guide/concurrency.md`).
-*   Fixed incorrect example in `pipeline.md` where `task_concurrency_limits` was placed in `StatusTracker`.
-*   Updated `executor.md` to link to the new concurrency guide.
+*   **Feature: Priority Queues**
+    *   `Pipeline.feed()` and `Pipeline.feed_async()` now accept a `priority` parameter (int).
+    *   Default priority is 100. Lower numbers = Higher Priority.
+    *   Allows urgent items to "jump the line" of waiting tasks.
+*   **Documentation:** Added "Interactive Execution" and "Priority Queues" sections to `docs/user-guide/pipeline.md` explaining the new workflows.
+*   **Example:** Added `examples/resume_checkpoint.py` and `examples/priority_demo.py` demonstrating the new capabilities.
+*   **Documentation:**
+    *   Added dedicated **Concurrency Control Guide** (`docs/user-guide/concurrency.md`).
+    *   Fixed incorrect example in `pipeline.md` where `task_concurrency_limits` was placed in `StatusTracker`.
+    *   Updated `executor.md` to link to the new concurrency guide.
 
 ## [0.3.5] - 2025-12-02
 
