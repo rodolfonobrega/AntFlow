@@ -20,6 +20,88 @@ A **Pipeline** connects multiple stages together:
 - Order can be preserved across stages
 - Results are collected from the final stage
 
+
+## Stage Configuration Reference
+
+The `Stage` class is the building block of your pipeline. Here are all the available configuration options:
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **`name`** | `str` | *Required* | Unique identifier for the stage. Used in logs and status events. |
+| **`workers`** | `int` | *Required* | Number of concurrent workers for this stage. |
+| **`tasks`** | `List[TaskFunc]` | *Required* | List of async functions to execute sequentially for each item. |
+| **`retry`** | `str` | `"per_task"` | Retry strategy: `"per_task"` (retry individual function) or `"per_stage"` (restart stage from first task). |
+| **`task_attempts`** | `int` | `3` | Max attempts per task (used in `"per_task"` mode). |
+| **`stage_attempts`** | `int` | `3` | Max attempts per stage (used in `"per_stage"` mode). |
+| **`task_wait_seconds`** | `float` | `1.0` | Time to wait between retries. |
+| **`task_concurrency_limits`** | `Dict[str, int]` | `None` | Max concurrent executions for specific task functions (see example below). |
+| **`unpack_args`** | `bool` | `False` | If `True`, unpacks the input item (`*args`/`**kwargs`) when calling the first task. |
+| **`on_success`** | `Callable` | `None` | Callback or `async` function to run on successful item completion. |
+| **`on_failure`** | `Callable` | `None` | Callback or `async` function to run on item failure (after all retries). |
+| **`skip_if`** | `Callable` | `None` | Predicate function `(item) -> bool`. If `True`, the item skips this stage entirely. |
+
+### Use Case: OpenAI Batch Processing
+
+`task_concurrency_limits` is powerful when you have a large worker pool for general processing but need to throttle specific operations (like API uploads) due to strict rate limits.
+
+**Scenario:**
+You have 1000 jobs to process using OpenAI's Batch API.
+The process is: `Generate -> Upload -> Start Job -> Poll -> Download`.
+
+**The Constraints:**
+1.  **Strict Upload Limit:** You can only upload **2 files** at the same time (rate limit).
+2.  **Batch Queue Capacity:** You can have **max 50 active jobs** running in the Batch API at once.
+
+**The Problem:**
+*   If you set `workers=2` (to satisfy the upload limit), you will only ever have 2 jobs running in the Batch API. You are wasting 48 slots of capacity!
+*   If you set `workers=50` (to fill the Batch API capacity), all 50 workers will try to upload files simultaneously at the start, causing you to hit the upload rate limit and crash.
+
+**Solution:**
+Use `workers=50` to maximize your Batch API usage, but use `task_concurrency_limits` to throttle *only* the upload task to 2.
+
+```python
+async def generate_jsonl(item): ...
+async def upload_file(item): ... # Strict limit!
+async def start_job(item): ...
+async def poll_status(item): ... # Takes a long time
+async def download_results(item): ...
+
+stage = Stage(
+    name="OpenAI_Batch_Job",
+    workers=50,  # 50 workers allow us to poll 50 jobs simultaneously!
+    tasks=[
+        generate_jsonl,
+        upload_file,
+        start_job,
+        poll_status,
+        download_results
+    ],
+    retry="per_task",
+    # The magic happens here:
+    task_concurrency_limits={
+        "upload_file": 2  # Only 2 uploads happen at once, even with 50 active workers
+    }
+)
+```
+
+### Architecture Comparison: Why not 2 Stages?
+
+You might think: *"Why not just use a GeneratorStage (2 workers) feeding into a PollingStage (50 workers)?"*
+
+**Scenario A: Two Stages (The "Firehose" Risk)**
+*   **Structure**: `GeneratorStage (2 workers)` -> `PollingStage (50 workers)`.
+*   **Behavior**: The `GeneratorStage` continuously produces jobs (2 at a time) and pushes them to `PollingStage`.
+*   **The Problem**: If `PollingStage` is full (50 jobs running), the `GeneratorStage` *keeps going*. It might start 750 jobs on OpenAI.
+*   **Result**: You have 750 jobs running on OpenAI, but only 50 workers "watching" them. 700 jobs are running unmonitored. If they fail or finish, you won't know until a worker frees up.
+
+**Scenario B: Single Stage + Limits (The "Bounded" Solution)**
+*   **Structure**: One Stage (50 workers) with `limit={upload: 2}`.
+*   **Behavior**: When all 50 workers are busy polling, *no new upload tasks can start*.
+*   **The Result**:
+    *   Max **50 jobs** are running on OpenAI at any time.
+    *   Job #51 stays in the input queue. It is **not generated, not uploaded, and not started**.
+    *   This provides true **Backpressure**. You usually want this to avoid overwhelming the external system or your own monitoring capacity.
+
 ## Basic Usage
 
 ### Creating a Simple Pipeline
