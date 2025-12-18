@@ -46,6 +46,7 @@ class Stage:
     on_success: Optional[Callable[[Any, Any, Dict[str, Any]], Any]] = None
     on_failure: Optional[Callable[[Any, Exception, Dict[str, Any]], Any]] = None
     skip_if: Optional[Callable[[Any], bool]] = None
+    queue_capacity: Optional[int] = None
 
     def validate(self) -> None:
         """
@@ -111,7 +112,16 @@ class Pipeline:
         self._status_tracker = status_tracker
 
         self._stop_event = asyncio.Event()
-        self._queues: List[asyncio.PriorityQueue] = [asyncio.PriorityQueue() for _ in stages]
+        self._queues: List[asyncio.PriorityQueue] = []
+        for stage in stages:
+            if stage.queue_capacity is not None:
+                maxsize = stage.queue_capacity
+            else:
+                # Smart Default: Buffer size based on worker count
+                # Factor of 10 allows for some buffering but prevents infinite growth
+                maxsize = max(1, stage.workers * 10)
+            
+            self._queues.append(asyncio.PriorityQueue(maxsize=maxsize))
         self._msg_counter = 0
         self._results: List[PipelineResult] = []
         self._sequence_counter = 0

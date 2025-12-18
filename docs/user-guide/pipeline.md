@@ -39,6 +39,7 @@ The `Stage` class is the building block of your pipeline. Here are all the avail
 | **`on_success`** | `Callable` | `None` | Callback or `async` function to run on successful item completion. |
 | **`on_failure`** | `Callable` | `None` | Callback or `async` function to run on item failure (after all retries). |
 | **`skip_if`** | `Callable` | `None` | Predicate function `(item) -> bool`. If `True`, the item skips this stage entirely. |
+| **`queue_capacity`** | `int` | `None` | Optional. Manually set input queue size. If `None` (default), uses smart limit (`workers * 10`). Set to `0` for infinite. |
 
 ### Use Case: OpenAI Batch Processing
 
@@ -123,6 +124,28 @@ stage = Stage(
     *   Max **50 jobs** are running on OpenAI at any time.
     *   Job #51 stays in the input queue. It is **not generated, not uploaded, and not started**.
     *   This provides true **Backpressure**. You usually want this to avoid overwhelming the external system or your own monitoring capacity.
+
+### Automatic Backpressure (Smart Limits)
+
+As of version 0.3.3, AntFlow implements **Smart Internal Limits** for all stage queues.
+
+*   **How it works:** Each stage has a limited input queue size. The default limit is `max(1, workers * 10)`. 
+*   **Example:** A stage with 5 workers allows ~50 items to be queued waiting for processing.
+*   **Effect:** If a stage is slow, its input queue fills up. Once full, the **previous stage** (or the `feed()` call) is blocked from adding more items until space clears up.
+*   **Benefit:** This automatically propagates backpressure upstream, preventing memory exhaustion and regulating flow without manual configuration.
+
+**Customizing Limits:**
+
+You can override this behavior using the `queue_capacity` parameter:
+
+```python
+stage = Stage(
+    name="BufferStage",
+    workers=2,
+    queue_capacity=1000, # Large buffer
+    tasks=[process]
+)
+```
 
 ## Basic Usage
 
