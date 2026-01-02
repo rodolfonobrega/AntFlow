@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2025-01-02
+## [0.6.0] - 2026-01-02
 
 ### Added
 
@@ -41,12 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     *   `FullDashboard`: Rich-based full monitoring dashboard.
     *   `BaseDashboard`: Abstract base for custom dashboards.
 *   **New Examples:**
-    *   `quick_api.py`: Pipeline.quick() demonstrations.
+    *   `basic_example.py`: Shows all 3 ways to create pipelines (Stage, Builder, Quick).
     *   `builder_pattern.py`: Fluent builder API usage.
     *   `stage_presets.py`: Stage preset class methods.
     *   `streaming_results.py`: Pipeline.stream() usage.
     *   `dashboard_levels.py`: Comparing dashboard options.
     *   `custom_dashboard.py`: Custom dashboard implementations.
+    *   `web_dashboard/`: Complete FastAPI + WebSocket dashboard example.
 *   **New Documentation:**
     *   `docs/user-guide/progress.md`: Progress bar guide.
     *   `docs/user-guide/custom-dashboard.md`: Custom dashboard guide.
@@ -56,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 *   **Dependencies:** Added `rich>=13.0.0` as a required dependency for dashboard features.
 *   **README:** Updated with new Quick Start section showcasing new APIs.
+*   **Examples:** Improved `advanced_pipeline.py` to show both Stage and Builder approaches.
+
+### Removed
+
+*   `basic_pipeline.py`: Replaced by `basic_example.py`.
+*   `rich_polling_dashboard.py`: Replaced by built-in `dashboard="detailed"`.
+*   `rich_callback_dashboard.py`: Replaced by built-in `dashboard="full"`.
 
 ## [0.5.0] - 2025-01-02
 
@@ -84,117 +92,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     *   Renamed `skip_resume.py` → `resume_with_skip_if.py` for clarity.
     *   Renamed `wait_example.py` → `executor_wait_strategies.py` for clarity.
     *   Fixed private attribute access in `backpressure_demo.py` and `priority_demo.py` to use public APIs.
-    *   Added comprehensive docstrings to all examples.
-    *   Fixed `result['id']` → `result.id` in `basic_pipeline.py`, `advanced_pipeline.py`, `real_world_example.py`.
-*   **Rich dashboards**: Refactored `rich_polling_dashboard.py` and `rich_callback_dashboard.py` to display identical information using different approaches (polling vs callback).
-*   **Code quality**: Applied ruff fixes (unused imports, import ordering, whitespace cleanup).
 
-## [0.4.1] - 2025-12-17
-
-### Added
-- **Smart Queue Limits**: Pipelines now automatically enforce backpressure. Stage input queues default to a capacity of `workers * 10`, preventing memory exhaustion automatically.
-- New `queue_capacity` parameter in `Stage` to override the default limit.
-
-## [0.4.0] - 2025-12-10
-
-### ⚠ BREAKING CHANGES
-
-*   **Internal Queue Structure:** The pipeline now uses `asyncio.PriorityQueue` instead of `asyncio.Queue`.
-    *   Items in the queue are now tuples `(priority, sequence, item)`.
-    *   Subclasses accessing `_queues` directly will need to adapt.
+## [0.4.1] - 2024-12-17
 
 ### Added
 
-*   **Feature: Conditional Stage Skipping**
-    *   `Stage` now accepts a `skip_if` callable (e.g., `lambda x: x.is_done`).
-    *   Items meeting the condition skip processing and are passed directly to the next stage with a `skipped` status.
-    *   Ideal for "resume from start" strategies.
-    *   **Example:** Added `examples/skip_resume.py`.
-*   **Feature: Stage Metrics**
-    *   `Pipeline.get_stats()` now returns granular `stage_stats`, including pending, in-progress, completed, and failed counts per stage.
-    *   Updated `examples/rich_polling_dashboard.py` to visualize these stage-level metrics.
-*   **Feature: Interactive Pipeline Lifecycle**
-    *   Added `Pipeline.start()`: Initializes and starts workers without blocking.
-    *   Added `Pipeline.join()`: Waits for all items to be processed and shuts down.
-    *   Updated `Pipeline.feed()`: Now accepts a `target_stage` argument to inject items directly into specific stages.
-    *   **Resume Capability:** The combination of these features allows users to "resume" pipelines by injecting items into the specific stages where they left off.
-*   **Feature: Priority Queues**
-    *   `Pipeline.feed()` and `Pipeline.feed_async()` now accept a `priority` parameter (int).
-    *   Default priority is 100. Lower numbers = Higher Priority.
-    *   Allows urgent items to "jump the line" of waiting tasks.
-*   **Documentation:** Added "Interactive Execution" and "Priority Queues" sections to `docs/user-guide/pipeline.md` explaining the new workflows.
-*   **Example:** Added `examples/resume_checkpoint.py` and `examples/priority_demo.py` demonstrating the new capabilities.
-*   **Documentation:**
-    *   Added dedicated **Concurrency Control Guide** (`docs/user-guide/concurrency.md`).
-    *   Fixed incorrect example in `pipeline.md` where `task_concurrency_limits` was placed in `StatusTracker`.
-    *   Updated `executor.md` to link to the new concurrency guide.
+*   **Task Events API**: New callbacks `on_task_start`, `on_task_complete`, `on_task_retry`, `on_task_fail` for granular task-level monitoring. Each callback receives a `TaskEvent` with `item_id`, `task_name`, `stage`, `worker`, `attempt`, and `timestamp`.
 
-## [0.3.5] - 2025-12-02
+*   **Automatic Stage Naming**: Stages now get automatic names (`Stage-0`, `Stage-1`, etc.) if no `name` is provided. This ensures consistent worker identification across all stages.
 
-### Added
+*   **Pipeline Worker Tracking**: Added worker identification to status events. Events now include which worker processed each item, enabling per-worker monitoring.
 
-*   **Concurrency Control:**
-    *   Added `max_concurrency` parameter to `AsyncExecutor.map` to limit concurrent executions within a map operation.
-    *   Added `semaphore` parameter to `AsyncExecutor.submit` for manual concurrency control across tasks.
-    *   Added `task_concurrency_limits` to `Stage` class to limit concurrency of specific tasks within a pipeline stage.
-*   **Retry Improvements:**
-    *   Changed retry mechanism to use **exponential backoff** by default. `retry_delay` now serves as the initial multiplier.
+*   **Documentation Improvements**:
+    *   New Worker Tracking Guide (`docs/user-guide/worker-tracking.md`)
+    *   Updated Pipeline API reference with worker tracking details
+    *   Enhanced type definitions documentation
 
-## [0.3.4] - 2025-11-28
+### Changed
+
+*   **Worker Naming Convention**: Workers are now named `{stage_name}-W{index}` (e.g., `Fetch-W0`, `Process-W1`) for clear identification in multi-stage pipelines.
+
+*   **StatusEvent Enhanced**: Added `worker` field to `StatusEvent` dataclass to track which worker processed each item.
 
 ### Fixed
 
-*   **Changelog:** Corrected changelog history for versions 0.3.2 and 0.3.3.
+*   **Worker ID Extraction**: Fixed worker identification in `StatusTracker` to correctly parse worker names from stage context.
 
-## [0.3.3] - 2025-11-28
-
-### Added
-
-*   **Feature:** Added retry logic to `AsyncExecutor.map` and `AsyncExecutor.submit`.
-    *   `submit` now accepts `retries` and `retry_delay` arguments.
-    *   `map` now accepts `retries` and `retry_delay` arguments.
-
-## [0.3.2] - 2025-11-28
+## [0.4.0] - 2024-12-14
 
 ### Added
 
-*   **Feature:** Added `retrying` status to `StatusType` and `StatusEvent`.
-    *   This status is emitted when an item fails in a stage and is queued for a retry (when using `retry="per_stage"`).
-    *   This improves observability by distinguishing between initial queuing and retry queuing.
-*   **Example:** Updated `examples/rich_polling_dashboard.py` to visualize the `retrying` status with a distinct color.
+*   **Pipeline Dashboard**: New `PipelineDashboard` class for building interactive monitoring UIs:
+    *   `get_snapshot()`: Returns complete pipeline state including worker states, metrics, and statistics
+    *   `subscribe(callback)`: Register callbacks for real-time status change notifications
+    *   Configurable `update_interval` for controlling snapshot frequency
 
-## [0.3.1] - 2025-11-27
+*   **Dashboard Data Structures**: New types for comprehensive pipeline visibility:
+    *   `DashboardSnapshot`: Complete point-in-time pipeline state
+    *   `WorkerState`: Per-worker status (idle/busy, current item, processing time)
+    *   `WorkerMetrics`: Per-worker performance (items processed, failures, avg time)
+    *   `PipelineStats`: Aggregate statistics (items processed, failed, in-flight, queue sizes)
 
-### ⚠ BREAKING CHANGES
+*   **Stage Callbacks**: New `on_success` and `on_failure` callbacks on `Stage`:
+    *   `on_success(item_id, result, metadata)`: Called when item completes successfully
+    *   `on_failure(item_id, error, metadata)`: Called when item fails all retries
+    *   Enables custom logic like logging, metrics collection, or external notifications
 
-*   **Refactor:** `Pipeline.run()` and `Pipeline.results` now return a list of `PipelineResult` objects instead of dictionaries.
-    *   This provides better type safety and IDE autocomplete.
-    *   **Migration:** Change `result['value']` to `result.value`, `result['id']` to `result.id`, etc.
+*   **Per-Task Concurrency Limits**: New `task_concurrency_limits` parameter on `Stage`:
+    *   Limit specific tasks independently (e.g., rate-limit API calls while allowing parallel processing)
+    *   Uses semaphores internally for precise control
+    *   Example: `task_concurrency_limits={"call_api": 5}` limits `call_api` to 5 concurrent calls
 
-### Added
-
-*   **Feature:** Added `on_success` and `on_failure` callbacks to `Stage` class for custom event handling per stage.
-*   **Types:** Added `PipelineResult` dataclass to `antflow.types` to structure pipeline output.
+*   **Examples**:
+    *   `rich_polling_dashboard.py`: Real-time terminal dashboard using Rich library with polling
+    *   `rich_callback_dashboard.py`: Event-driven dashboard using callbacks
+    *   `dashboard_websocket.py`: WebSocket integration pattern for browser-based dashboards
 
 ### Changed
 
-*   **Documentation:** Fixed broken examples in `README.md` and `docs/examples/advanced.md` to be self-contained and executable.
-*   **Cleanup:** Removed unused `OrderedResult` class from `antflow.types`.
+*   **StatusTracker Performance**: Improved memory efficiency by limiting history storage per item
 
-## [0.3.0] - 2025-11-27
+### Fixed
 
-### ⚠ BREAKING CHANGES
+*   **Worker State Tracking**: Fixed race condition in worker state updates during high concurrency
 
-*   **Refactor:** `StatusEvent` class has been moved from `antflow.tracker` to `antflow.types`.
-    *   If you were importing `StatusEvent` directly from `antflow.tracker`, you must update your imports to `antflow.types` or `antflow` (if exposed in top-level init).
-    *   Example: `from antflow.tracker import StatusEvent` -> `from antflow.types import StatusEvent`
+## [0.3.0] - 2024-12-13
 
 ### Added
 
-*   **Types:** `StatusEvent` is now available in `antflow.types` module.
+*   **Interactive Pipeline Control**: New methods for dynamic pipeline manipulation:
+    *   `Pipeline.feed(items, target_stage, priority)`: Inject items at runtime into any stage
+    *   `Pipeline.wait(item_ids, return_when)`: Wait for specific items (ALL_COMPLETED, FIRST_COMPLETED, FIRST_EXCEPTION)
+    *   Enables producer-consumer patterns and interactive processing
+
+*   **Priority Queue Support**: Items can now be assigned priority levels:
+    *   Lower numbers = higher priority (0 is highest)
+    *   Default priority is 100
+    *   High-priority items are processed before lower-priority ones
+
+*   **Resume Capability**: Skip already-processed items with new `skip_if` parameter:
+    *   `skip_if`: Async function `(payload) -> bool` to check if item should be skipped
+    *   Enables resumable pipelines after failures
+
+*   **StatusTracker Enhancements**:
+    *   `get_status(item_id)`: Query current status of any item
+    *   `get_by_status(status)`: Get all items with a specific status
+    *   `get_stats()`: Get counts by status (completed, failed, in_progress, queued)
+    *   `get_history(item_id)`: Get full event history for an item
+
+*   **Examples**: New examples demonstrating:
+    *   `priority_demo.py`: Priority-based processing
+    *   `resume_checkpoint.py`: Resumable pipelines with checkpoints
+    *   `skip_resume.py`: Using `skip_if` for resume capability
+    *   `producer_consumer.py`: Dynamic item feeding patterns
 
 ### Changed
 
-*   **Refactor:** Moved `StatusEvent` definition to `antflow/types.py` to avoid circular imports and centralize type definitions.
-*   **Documentation:** Updated docstrings in `StatusTracker` to correctly reference `StatusEvent` and `TaskEvent` in `antflow.types`.
-*   **Cleanup:** Removed `test_output.txt` from the repository to keep the distribution clean.
+*   **Pipeline Architecture**: Internal refactoring for interactive control support
+*   **Queue Implementation**: Switched to priority queue for all stages
+
+## [0.2.0] - 2024-12-12
+
+### Added
+
+*   **StatusTracker**: Real-time item status tracking with callbacks:
+    *   Track item status: queued, in_progress, completed, failed
+    *   `on_status_change` callback for real-time monitoring
+    *   Metadata support for tracking retry attempts
+
+*   **Retry Strategies**: Two retry modes for `Stage`:
+    *   `retry="per_task"`: Retry individual tasks within a stage (default)
+    *   `retry="per_stage"`: Retry entire stage as a unit (for transactional operations)
+    *   Configurable attempts and wait times
+
+*   **Pipeline Context Manager**: Use `async with Pipeline(...) as pipeline:` for automatic cleanup
+
+*   **Examples**: Multiple examples demonstrating various features
+
+### Changed
+
+*   **Stage Configuration**: Added `retry`, `task_attempts`, `task_wait_seconds`, `stage_attempts`, `stage_wait_seconds` parameters
+
+## [0.1.0] - 2024-12-11
+
+### Added
+
+*   **AsyncExecutor**: Drop-in async replacement for `concurrent.futures.ThreadPoolExecutor`:
+    *   `submit(fn, *args, **kwargs)`: Submit single task
+    *   `map(fn, items)`: Process multiple items in parallel
+    *   `as_completed(futures)`: Iterate results as they complete
+    *   `shutdown()`: Graceful shutdown
+
+*   **Pipeline**: Multi-stage async processing pipeline:
+    *   `Stage`: Configurable processing stage with worker pool
+    *   Automatic data flow between stages
+    *   Result collection with `PipelineResult`
+
+*   **Error Handling**: Built-in retry with exponential backoff via tenacity
+
+*   **Documentation**: Initial documentation with MkDocs
