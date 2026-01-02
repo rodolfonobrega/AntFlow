@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-01-02
+
+### ⚠ BREAKING CHANGES
+
+*   **AsyncExecutor.map() now returns List instead of AsyncIterator**
+    *   `map()` now collects all results and returns `List[R]` directly, matching `concurrent.futures` behavior.
+    *   For streaming results, use the new `map_iter()` method which returns `AsyncIterator[R]`.
+    *   **Migration:** `async for result in executor.map(fn, items):` → `for result in await executor.map(fn, items):`
+    *   For streaming: `async for result in executor.map_iter(fn, items):`
+*   **Removed `max_concurrency` parameter from `map()` and `map_iter()`**
+    *   Use `max_workers` on executor creation or explicit semaphores with `submit()` instead.
+
+### Added
+
+*   **AsyncExecutor.map_iter()**: New method for streaming results as `AsyncIterator`, preserving input order.
+
+### Fixed
+
+*   **Pipeline progress calculation**: Fixed bug where `items_processed` was incremented per stage instead of only when items completed the entire pipeline (caused 300% progress with 3 stages).
+
+### Changed
+
+*   **Examples reorganization**:
+    *   Consolidated 4 monitoring examples into 2: `monitoring_status_tracker.py` and `monitoring_workers.py`.
+    *   Renamed `skip_resume.py` → `resume_with_skip_if.py` for clarity.
+    *   Renamed `wait_example.py` → `executor_wait_strategies.py` for clarity.
+    *   Fixed private attribute access in `backpressure_demo.py` and `priority_demo.py` to use public APIs.
+    *   Added comprehensive docstrings to all examples.
+    *   Fixed `result['id']` → `result.id` in `basic_pipeline.py`, `advanced_pipeline.py`, `real_world_example.py`.
+*   **Rich dashboards**: Refactored `rich_polling_dashboard.py` and `rich_callback_dashboard.py` to display identical information using different approaches (polling vs callback).
+*   **Code quality**: Applied ruff fixes (unused imports, import ordering, whitespace cleanup).
+
 ## [0.4.1] - 2025-12-17
 
 ### Added

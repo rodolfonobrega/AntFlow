@@ -6,7 +6,7 @@ Simple examples to get started with AntFlow.
 
 ### Using map()
 
-The `map()` method applies an async function to multiple inputs:
+The `map()` method applies an async function to multiple inputs and returns a list:
 
 ```python
 import asyncio
@@ -19,10 +19,8 @@ async def square(x: int) -> int:
 
 async def main():
     async with AsyncExecutor(max_workers=5) as executor:
-        # Map with order preservation (default)
-        results = []
-        async for result in executor.map(square, range(10)):
-            results.append(result)
+        # Map returns list directly
+        results = await executor.map(square, range(10))
         print(results)  # [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 
 asyncio.run(main())
@@ -63,13 +61,38 @@ asyncio.run(main())
 [0, 1, 8, 27, 64]
 ```
 
-### Using as_completed()
+### Using map_iter() for Streaming
 
-Process results as they complete:
+For streaming results as they arrive (useful for large datasets or progress feedback):
 
 ```python
 import asyncio
 from antflow import AsyncExecutor
+
+async def square(x: int) -> int:
+    await asyncio.sleep(0.1)
+    return x * x
+
+async def main():
+    async with AsyncExecutor(max_workers=5) as executor:
+        # Stream results with async for
+        async for result in executor.map_iter(square, range(10)):
+            print(f"Got: {result}")
+
+asyncio.run(main())
+```
+
+### Using as_completed()
+
+Process results as they complete (not in input order):
+
+```python
+import asyncio
+from antflow import AsyncExecutor
+
+async def square(x: int) -> int:
+    await asyncio.sleep(0.1)
+    return x * x
 
 async def main():
     async with AsyncExecutor(max_workers=5) as executor:
@@ -90,6 +113,63 @@ Completed: 49
 Completed: 36
 Completed: 64
 ```
+
+> **Note:** The order varies because `as_completed()` returns results as they finish, not in input order.
+
+### map() vs as_completed() Comparison
+
+This example shows the key difference between the two approaches:
+
+```python
+import asyncio
+from antflow import AsyncExecutor
+
+async def variable_delay_task(x: int) -> str:
+    # Item 0 is slow, others are fast
+    delay = 2.0 if x == 0 else 0.3
+    await asyncio.sleep(delay)
+    return f"Result-{x}"
+
+async def main():
+    async with AsyncExecutor(max_workers=5) as executor:
+        items = range(5)
+
+        # map(): Results in INPUT order
+        print("=== map() - Input Order ===")
+        results = await executor.map(variable_delay_task, items)
+        for r in results:
+            print(f"  {r}")
+
+        # as_completed(): Results in COMPLETION order
+        print("\n=== as_completed() - Completion Order ===")
+        futures = [executor.submit(variable_delay_task, i) for i in items]
+        async for future in executor.as_completed(futures):
+            print(f"  {await future.result()}")
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+=== map() - Input Order ===
+  Result-0
+  Result-1
+  Result-2
+  Result-3
+  Result-4
+
+=== as_completed() - Completion Order ===
+  Result-1
+  Result-3
+  Result-2
+  Result-4
+  Result-0
+```
+
+**Key Insight:**
+
+- `map()` waits for slow item 0 before returning anything
+- `as_completed()` returns fast items (1-4) immediately, then slow item (0)
 
 ## Pipeline Examples
 
@@ -246,9 +326,7 @@ async def main():
     # Use executor for quick parallel processing
     print("=== AsyncExecutor ===")
     async with AsyncExecutor(max_workers=5) as executor:
-        results = []
-        async for result in executor.map(double, range(5)):
-            results.append(result)
+        results = await executor.map(double, range(5))
         print(f"Executor results: {results}")
 
     # Use pipeline for multi-stage processing

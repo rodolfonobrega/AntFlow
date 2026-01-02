@@ -192,7 +192,7 @@ async def main():
         print()
         print("Sample output (first 3 users):")
         for result in results[:3]:
-            data = result['value']
+            data = result.value
             print(f"\n  User ID: {data['id']}")
             print(f"  Name: {data['full_name']}")
             print(f"  Email: {data['email_address']}")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from enum import Enum
-from typing import Any, AsyncIterator, Callable, Iterable, Set, Tuple, TypeVar
+from typing import Any, AsyncIterator, Callable, Iterable, List, Set, Tuple, TypeVar
 
 from .exceptions import ExecutorShutdownError
 from .utils import setup_logger
@@ -202,10 +202,12 @@ class AsyncExecutor:
         timeout: float | None = None,
         retries: int = 0,
         retry_delay: float = 0.1,
-        max_concurrency: int | None = None,
-    ) -> AsyncIterator[R]:
+    ) -> List[R]:
         """
-        Map an async function over iterables, yielding results in input order.
+        Map an async function over iterables and return results as a list.
+
+        Similar to `concurrent.futures.Executor.map()`, but returns a list directly
+        instead of an iterator (since `list(executor.map(...))` is the common pattern).
 
         Args:
             fn: Async callable to map
@@ -213,21 +215,73 @@ class AsyncExecutor:
             timeout: Maximum time to wait for each result
             retries: Number of retries on failure
             retry_delay: Delay between retries in seconds
-            max_concurrency: Maximum number of concurrent executions for this map call
+
+        Returns:
+            List of results from fn applied to each input, in input order
+
+        Raises:
+            ExecutorShutdownError: If executor has been shut down
+
+        Example:
+            ```python
+            async with AsyncExecutor(max_workers=5) as executor:
+                results = await executor.map(process, range(100))
+                print(results)  # [0, 2, 4, 6, ...]
+            ```
+        """
+        results: List[R] = []
+        async for result in self.map_iter(
+            fn,
+            *iterables,
+            timeout=timeout,
+            retries=retries,
+            retry_delay=retry_delay,
+        ):
+            results.append(result)
+        return results
+
+    async def map_iter(
+        self,
+        fn: Callable[[T], Any],
+        *iterables: Iterable[T],
+        timeout: float | None = None,
+        retries: int = 0,
+        retry_delay: float = 0.1,
+    ) -> AsyncIterator[R]:
+        """
+        Map an async function over iterables, yielding results in input order.
+
+        Use this instead of `map()` when you need streaming behavior:
+        - Process results as they arrive
+        - Handle large datasets without loading all results into memory
+        - Early exit when a condition is met
+
+        Args:
+            fn: Async callable to map
+            *iterables: Iterables to map over
+            timeout: Maximum time to wait for each result
+            retries: Number of retries on failure
+            retry_delay: Delay between retries in seconds
 
         Yields:
             Results from fn applied to each input
 
         Raises:
             ExecutorShutdownError: If executor has been shut down
+
+        Example:
+            ```python
+            async with AsyncExecutor(max_workers=5) as executor:
+                async for result in executor.map_iter(process, range(100)):
+                    print(result)
+                    if result > 50:
+                        break  # Early exit
+            ```
         """
         if self._shutdown:
             raise ExecutorShutdownError("Cannot use map on a shutdown executor")
 
         await self._ensure_workers_started()
-
-        # Create semaphore if max_concurrency is specified
-        semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
 
         futures = []
         for args in zip(*iterables):
@@ -237,7 +291,6 @@ class AsyncExecutor:
                     args[0],
                     retries=retries,
                     retry_delay=retry_delay,
-                    semaphore=semaphore,
                 )
             else:
                 future = self.submit(
@@ -245,7 +298,6 @@ class AsyncExecutor:
                     *args,
                     retries=retries,
                     retry_delay=retry_delay,
-                    semaphore=semaphore,
                 )
             futures.append(future)
 

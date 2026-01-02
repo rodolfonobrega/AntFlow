@@ -1,8 +1,9 @@
-import asyncio
-import pytest
 from unittest.mock import Mock
-from antflow import AsyncExecutor
+
+import pytest
 from tenacity import RetryError
+
+from antflow import AsyncExecutor
 
 
 class TestAsyncExecutorRetry:
@@ -40,7 +41,6 @@ class TestAsyncExecutorRetry:
     @pytest.mark.asyncio
     async def test_map_retry_success(self):
         """Test map retries and succeeds."""
-        # Task 0 fails once, Task 1 succeeds immediately
         call_counts = {0: 0, 1: 0}
 
         async def task(x):
@@ -50,9 +50,7 @@ class TestAsyncExecutorRetry:
             return x * 2
 
         async with AsyncExecutor(max_workers=2) as executor:
-            results = []
-            async for res in executor.map(task, [0, 1], retries=2, retry_delay=0.01):
-                results.append(res)
+            results = await executor.map(task, [0, 1], retries=2, retry_delay=0.01)
 
             assert results == [0, 2]
             assert call_counts[0] == 2
@@ -67,5 +65,36 @@ class TestAsyncExecutorRetry:
 
         async with AsyncExecutor(max_workers=2) as executor:
             with pytest.raises(RetryError):
-                async for _ in executor.map(task, [0], retries=2, retry_delay=0.01):
+                await executor.map(task, [0], retries=2, retry_delay=0.01)
+
+    @pytest.mark.asyncio
+    async def test_map_iter_retry_success(self):
+        """Test map_iter retries and succeeds."""
+        call_counts = {0: 0, 1: 0}
+
+        async def task(x):
+            call_counts[x] += 1
+            if x == 0 and call_counts[x] < 2:
+                raise ValueError("Fail once")
+            return x * 2
+
+        async with AsyncExecutor(max_workers=2) as executor:
+            results = []
+            async for res in executor.map_iter(task, [0, 1], retries=2, retry_delay=0.01):
+                results.append(res)
+
+            assert results == [0, 2]
+            assert call_counts[0] == 2
+            assert call_counts[1] == 1
+
+    @pytest.mark.asyncio
+    async def test_map_iter_retry_failure(self):
+        """Test map_iter retries and fails after max retries."""
+
+        async def task(x):
+            raise ValueError("Always failing")
+
+        async with AsyncExecutor(max_workers=2) as executor:
+            with pytest.raises(RetryError):
+                async for _ in executor.map_iter(task, [0], retries=2, retry_delay=0.01):
                     pass

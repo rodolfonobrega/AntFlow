@@ -5,9 +5,8 @@ AntFlow provides multiple levels of concurrency control to help you manage resou
 ## Levels of Control
 
 1.  **Worker Pool**: Limits total concurrent tasks in an executor or stage.
-2.  **Map Concurrency**: Limits concurrent items processed within a single `.map()` call.
-3.  **Task Limits**: Limits specific task functions within a Pipeline Stage.
-4.  **Manual Semaphores**: Granular control for individual `.submit()` calls.
+2.  **Task Limits**: Limits specific task functions within a Pipeline Stage.
+3.  **Manual Semaphores**: Granular control for individual `.submit()` calls.
 
 ---
 
@@ -22,7 +21,7 @@ from antflow import AsyncExecutor
 
 # Maximum 10 tasks running at once
 async with AsyncExecutor(max_workers=10) as executor:
-    ...
+    results = await executor.map(task, items)
 ```
 
 ### In Pipeline Stage
@@ -40,26 +39,7 @@ stage = Stage(
 
 ---
 
-## 2. Map Concurrency (Batch Limit)
-
-When processing a large batch of items with `.map()`, you might want to limit concurrency *just for that batch*, even if the executor has more workers available.
-
-**Use Case:** You have 100 workers for general tasks, but you want to process a specific list of 1000 URLs with only 50 concurrent connections.
-
-```python
-async with AsyncExecutor(max_workers=100) as executor:
-    # Process 1000 items, but only 50 at a time
-    async for result in executor.map(
-        fetch_url, 
-        urls, 
-        max_concurrency=50
-    ):
-        print(result)
-```
-
----
-
-## 3. Pipeline Task Limits (Granular Rate Limiting)
+## 2. Pipeline Task Limits (Granular Rate Limiting)
 
 In a Pipeline, a Stage might have multiple tasks (e.g., `validate` -> `fetch_api` -> `save_db`). You might have 50 workers to keep `validate` and `save_db` fast, but `fetch_api` has a strict rate limit.
 
@@ -81,7 +61,7 @@ stage = Stage(
 
 ---
 
-## 4. Manual Semaphores (Custom Control)
+## 3. Manual Semaphores (Custom Control)
 
 For complex workflows using `.submit()`, you can pass a shared `asyncio.Semaphore` to group tasks under a single limit.
 
@@ -97,16 +77,27 @@ async def main():
 
     async with AsyncExecutor(max_workers=100) as executor:
         futures = []
-        
+
         # Submit tasks that need the DB
         for item in items:
             f = executor.submit(
-                db_task, 
-                item, 
+                db_task,
+                item,
                 semaphore=db_semaphore  # Share the limit
             )
             futures.append(f)
-            
+
         # Submit other tasks that don't need the DB (unlimited up to max_workers)
         executor.submit(cpu_task, item)
 ```
+
+---
+
+## Choosing the Right Approach
+
+| Scenario | Recommended Approach |
+|----------|---------------------|
+| Simple parallel processing | Set `max_workers` appropriately |
+| Rate-limited API calls | Create executor with matching workers |
+| Mixed task types in Pipeline | Use `task_concurrency_limits` |
+| Complex submit workflows | Use shared semaphores |

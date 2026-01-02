@@ -41,7 +41,7 @@ async with AsyncExecutor(max_workers=3) as executor:
 
 ### Mapping Over Iterables
 
-The `map()` method applies an async function to multiple inputs:
+The `map()` method applies an async function to multiple inputs and returns a list:
 
 ```python
 import asyncio
@@ -52,12 +52,33 @@ async def square(x):
     return x * x
 
 async with AsyncExecutor(max_workers=5) as executor:
-    # Map over inputs (results are returned in order)
-    results = []
-    async for result in executor.map(square, range(10)):
-        results.append(result)
+    # Map over inputs - returns list directly
+    results = await executor.map(square, range(10))
     print(results)  # [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 ```
+
+### Streaming Results with map_iter()
+
+For streaming behavior (processing results as they arrive), use `map_iter()`:
+
+```python
+import asyncio
+from antflow import AsyncExecutor
+
+async def square(x):
+    await asyncio.sleep(0.1)
+    return x * x
+
+async with AsyncExecutor(max_workers=5) as executor:
+    # Stream results with async for
+    async for result in executor.map_iter(square, range(10)):
+        print(result)  # Prints each result as it arrives
+```
+
+**When to use each:**
+
+- **`map()`**: Use for most cases - returns a list directly (like `list(executor.map(...))` in concurrent.futures)
+- **`map_iter()`**: Use for streaming, memory-constrained scenarios, or early exit patterns
 
 ### Multiple Iterables
 
@@ -71,9 +92,7 @@ async def add(x, y):
     return x + y
 
 async with AsyncExecutor(max_workers=3) as executor:
-    results = []
-    async for result in executor.map(add, [1, 2, 3], [4, 5, 6]):
-        results.append(result)
+    results = await executor.map(add, [1, 2, 3], [4, 5, 6])
     print(results)  # [5, 7, 9]
 ```
 
@@ -99,6 +118,116 @@ async with AsyncExecutor(max_workers=5) as executor:
         print(f"Got: {result}")
 ```
 
+## map() vs as_completed(): When to Use Each
+
+Understanding the difference between `map()` and `as_completed()` is crucial for choosing the right approach.
+
+### Key Difference: Result Order
+
+| Method | Result Order | Blocking Behavior |
+|--------|--------------|-------------------|
+| `map()` | **Input order** (deterministic) | Waits for items in sequence |
+| `as_completed()` | **Completion order** (non-deterministic) | Returns as soon as any completes |
+
+### Visual Example
+
+Consider processing 5 items where item 0 takes 5 seconds and items 1-4 take 1 second each:
+
+```
+Input: [A, B, C, D, E]
+       A=5s, B=1s, C=1s, D=1s, E=1s
+
+Timeline with map():
+├─ t=1s: B,C,D,E ready (waiting for A)
+├─ t=5s: A ready → return [A, B, C, D, E]
+└─ Total: 5s, all results at once
+
+Timeline with as_completed():
+├─ t=1s: yield B (or C,D,E - whoever finishes first)
+├─ t=1s: yield C
+├─ t=1s: yield D
+├─ t=1s: yield E
+├─ t=5s: yield A
+└─ Total: 5s, but you see 4 results at t=1s!
+```
+
+### Code Comparison
+
+```python
+import asyncio
+from antflow import AsyncExecutor
+
+async def process(x):
+    delay = 3.0 if x == 0 else 0.5
+    await asyncio.sleep(delay)
+    return f"Result-{x}"
+
+async def main():
+    async with AsyncExecutor(max_workers=5) as executor:
+
+        # Using map() - results in INPUT order
+        print("=== map() ===")
+        results = await executor.map(process, range(5))
+        for r in results:
+            print(r)
+        # Output: Result-0, Result-1, Result-2, Result-3, Result-4
+        # (all printed at once after 3s)
+
+        # Using as_completed() - results in COMPLETION order
+        print("\n=== as_completed() ===")
+        futures = [executor.submit(process, i) for i in range(5)]
+        async for future in executor.as_completed(futures):
+            print(await future.result())
+        # Output: Result-1, Result-2, Result-3, Result-4 (at 0.5s)
+        #         Result-0 (at 3s)
+
+asyncio.run(main())
+```
+
+### When to Use Each
+
+#### Use `map()` when:
+
+- ✅ **Order matters** - Results must match input order
+- ✅ **Batch processing** - You need all results before proceeding
+- ✅ **Simple code** - One-liner: `results = await executor.map(...)`
+- ✅ **Database inserts** - Maintaining referential integrity
+
+```python
+# Example: Processing records where order matters
+records = await executor.map(fetch_record, record_ids)
+await database.bulk_insert(records)  # Order must match IDs
+```
+
+#### Use `as_completed()` when:
+
+- ✅ **Progress feedback** - Show results as they arrive
+- ✅ **Early termination** - Stop after finding what you need
+- ✅ **Resource efficiency** - Free memory as results complete
+- ✅ **Slow outliers** - Don't let one slow task block everything
+
+```python
+# Example: Search across multiple sources, return first match
+futures = [executor.submit(search, source) for source in sources]
+async for future in executor.as_completed(futures):
+    result = await future.result()
+    if result.found:
+        print(f"Found: {result}")
+        break  # Early exit!
+```
+
+### Summary Table
+
+| Scenario | Recommended Method |
+|----------|-------------------|
+| Need results in input order | `map()` |
+| Show progress to user | `as_completed()` |
+| Batch insert to database | `map()` |
+| Find first successful result | `as_completed()` |
+| Simple parallel processing | `map()` |
+| Minimize perceived latency | `as_completed()` |
+| Memory-constrained streaming | `map_iter()` |
+
 ## Automatic Retries
 
 `AsyncExecutor` supports automatic retries for failed tasks using `tenacity`. You can configure retries for both `submit()` and `map()`.
@@ -110,9 +239,9 @@ async with AsyncExecutor(max_workers=3) as executor:
     # Retry up to 3 times (4 attempts total) with exponential backoff
     # retry_delay sets the initial multiplier (e.g., 0.5s, 1s, 2s...)
     future = executor.submit(
-        flaky_task, 
-        arg, 
-        retries=3, 
+        flaky_task,
+        arg,
+        retries=3,
         retry_delay=0.5
     )
     result = await future.result()
@@ -123,41 +252,27 @@ async with AsyncExecutor(max_workers=3) as executor:
 ```python
 async with AsyncExecutor(max_workers=5) as executor:
     # Apply retry logic to all mapped tasks
-    async for result in executor.map(
-        flaky_task, 
-        items, 
-        retries=3, 
+    results = await executor.map(
+        flaky_task,
+        items,
+        retries=3,
         retry_delay=1.0
-    ):
-        print(result)
-```
-
-    result = await future.result()
+    )
 ```
 
 ## Concurrency Limits
 
-You can limit the number of concurrent executions for specific tasks, which is useful for rate limiting.
+You can limit the number of concurrent executions for specific tasks using semaphores, which is useful for rate limiting.
 
 For a detailed overview of all concurrency options, see the [Concurrency Control Guide](concurrency.md).
 
-### In `map()`
-
-Use `max_concurrency` to limit concurrent tasks within a map operation:
-
-```python
-async with AsyncExecutor(max_workers=100) as executor:
-    # Only 10 tasks will run at once
-    async for result in executor.map(api_call, items, max_concurrency=10):
-        print(result)
-```
-
-### In `submit()`
+### Using Semaphores with submit()
 
 Use `semaphore` to share a concurrency limit across multiple submit calls:
 
 ```python
 import asyncio
+from antflow import AsyncExecutor
 
 # Create a semaphore for rate limiting
 api_limit = asyncio.Semaphore(10)
@@ -168,7 +283,7 @@ async with AsyncExecutor(max_workers=100) as executor:
         # Share the semaphore across tasks
         f = executor.submit(api_call, item, semaphore=api_limit)
         futures.append(f)
-    
+
     # Wait for results
     results = [await f.result() for f in futures]
 ```
@@ -258,9 +373,7 @@ from antflow import AsyncExecutor
 
 async with AsyncExecutor(max_workers=5) as executor:
     # Tasks are automatically waited for on exit
-    results = []
-    async for result in executor.map(task, items):
-        results.append(result)
+    results = await executor.map(task, items)
 # Executor is automatically shut down here
 ```
 
@@ -289,8 +402,8 @@ from antflow import AsyncExecutor
 
 async with AsyncExecutor(max_workers=5) as executor:
     try:
-        async for result in executor.map(task, items, timeout=10.0):
-            print(result)
+        results = await executor.map(task, items, timeout=10.0)
+        print(results)
     except asyncio.TimeoutError:
         print("One of the tasks timed out")
 ```
@@ -338,10 +451,10 @@ def chunks(iterable, size):
         yield batch
 
 async with AsyncExecutor(max_workers=5) as executor:
-    batches = chunks(large_item_list, batch_size=100)
-    async for results in executor.map(process_batch, batches):
-        for result in results:
-            print(result)
+    batches = list(chunks(large_item_list, batch_size=100))
+    all_results = await executor.map(process_batch, batches)
+    # Flatten results
+    results = [item for batch in all_results for item in batch]
 ```
 
 ## Comparison with concurrent.futures
@@ -352,16 +465,18 @@ AsyncExecutor is designed to be familiar to users of `concurrent.futures`:
 |-------------------|---------------|
 | `ThreadPoolExecutor(max_workers=N)` | `AsyncExecutor(max_workers=N)` |
 | `executor.submit(fn, *args)` | `executor.submit(fn, *args)` |
-| `executor.map(fn, *iterables)` | `executor.map(fn, *iterables)` |
+| `list(executor.map(fn, *iterables))` | `await executor.map(fn, *iterables)` |
 | `as_completed(futures)` | `executor.as_completed(futures)` |
 | `executor.shutdown(wait=True)` | `await executor.shutdown(wait=True)` |
 | `future.result()` | `await future.result()` |
 
 Key differences:
+
 - AsyncExecutor works with async functions
-- Methods return async iterators/futures
+- `map()` returns a list directly (no need to wrap in `list()`)
 - Uses `async with` instead of `with`
 - All operations are awaitable
+- `map_iter()` available for streaming behavior
 
 ## Complete Example
 
@@ -387,15 +502,10 @@ async def main():
     async with AsyncExecutor(max_workers=10) as executor:
         print("Fetching URLs...")
 
-        # Process as completed
-        futures = [executor.submit(fetch_and_process, url) for url in urls]
-
-        async for future in executor.as_completed(futures):
-            try:
-                length = await future.result(timeout=30.0)
-                print(f"Page length: {length}")
-            except Exception as e:
-                print(f"Error: {e}")
+        # Simple parallel processing with map()
+        results = await executor.map(fetch_and_process, urls)
+        for url, length in zip(urls, results):
+            print(f"{url}: {length} chars")
 
 asyncio.run(main())
 ```

@@ -120,7 +120,7 @@ class Pipeline:
                 # Smart Default: Buffer size based on worker count
                 # Factor of 10 allows for some buffering but prevents infinite growth
                 maxsize = max(1, stage.workers * 10)
-            
+
             self._queues.append(asyncio.PriorityQueue(maxsize=maxsize))
         self._msg_counter = 0
         self._results: List[PipelineResult] = []
@@ -155,7 +155,7 @@ class Pipeline:
         """
         queue_sizes = {}
         stage_stats = {}
-        
+
         # Calculate aggregations
         worker_states = self.get_worker_states().values()
         worker_metrics_all = self.get_worker_metrics().values()
@@ -164,23 +164,23 @@ class Pipeline:
             # Pending
             pending = self._queues[i].qsize()
             queue_sizes[stage.name] = pending
-            
+
             # In Progress (Busy Workers)
             in_progress = sum(
-                1 for s in worker_states 
+                1 for s in worker_states
                 if s.stage == stage.name and s.status == "busy"
             )
-            
+
             # Completed/Failed (by workers in this stage)
             completed = sum(
-                m.items_processed for m in worker_metrics_all 
+                m.items_processed for m in worker_metrics_all
                 if m.stage == stage.name
             )
             failed = sum(
-                m.items_failed for m in worker_metrics_all 
+                m.items_failed for m in worker_metrics_all
                 if m.stage == stage.name
             )
-            
+
             stage_stats[stage.name] = StageStats(
                 stage_name=stage.name,
                 pending_items=pending,
@@ -305,8 +305,8 @@ class Pipeline:
         )
 
     async def feed(
-        self, 
-        items: Sequence[Any], 
+        self,
+        items: Sequence[Any],
         target_stage: Optional[str] = None,
         priority: int = 100
     ) -> None:
@@ -315,10 +315,10 @@ class Pipeline:
 
         Args:
             items: Sequence of items to process
-            target_stage: Name of the stage to inject items into. 
+            target_stage: Name of the stage to inject items into.
                          If None, feeds into the first stage.
             priority: Priority level (lower = higher priority). Default 100.
-        
+
         Raises:
             ValueError: If target_stage is provided but not found.
         """
@@ -341,13 +341,13 @@ class Pipeline:
             seq = self._msg_counter
             self._msg_counter += 1
             await q.put((priority, seq, (payload, 1)))
-            
+
             logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name} prio={priority}")
             await self._emit_status(payload["id"], stage_name, "queued")
 
     async def feed_async(
-        self, 
-        items: AsyncIterable[Any], 
+        self,
+        items: AsyncIterable[Any],
         target_stage: Optional[str] = None,
         priority: int = 100
     ) -> None:
@@ -414,25 +414,25 @@ class Pipeline:
     async def start(self) -> None:
         """
         Start the pipeline workers in the background.
-        
+
         This method initializes the worker pool and starts processing items immediately
         as they are available in the queues. Use `feed()` to add items.
-        
+
         Raises:
             PipelineError: If pipeline is already running
         """
         if self._runner_task and not self._runner_task.done():
             raise PipelineError("Pipeline is already running")
-            
+
         self._stop_event.clear()
         self._shutdown = False
         self._worker_tasks = []
         self._runner_task = asyncio.create_task(self._backend_runner())
-    
+
     async def join(self) -> None:
         """
         Wait for all enqueued items to be processed and stop workers.
-        
+
         This method:
         1. Waits for all queues to be empty (all items processed)
         2. Signals workers to stop
@@ -447,14 +447,14 @@ class Pipeline:
         logger.debug("Waiting for queues to drain...")
         for q in self._queues:
             await q.join()
-            
+
         logger.debug("Queues drained, signaling stop...")
         self._stop_event.set()
-        
+
         if self._runner_task:
             await self._runner_task
             self._runner_task = None
-            
+
     async def _backend_runner(self) -> None:
         """Internal runner that manages the TaskGroup and workers."""
         try:
@@ -472,12 +472,12 @@ class Pipeline:
                             self._stage_worker(worker_name, stage_index, stage, input_q, output_q)
                         )
                         self._worker_tasks.append(task)
-                        
+
                 # Wait for stop signal
                 # Workers themselves monitor stop_event, so we just wait for them to finish
                 # which happens when stop_event is set AND queues are empty (per _stage_worker logic)
                 # TaskGroup will wait for all tasks to complete upon exit.
-                
+
         except Exception as e:
             logger.error(f"Pipeline backend runner failed: {e}")
             raise
@@ -485,7 +485,7 @@ class Pipeline:
     async def run(self, items: Sequence[Any]) -> List[PipelineResult]:
         """
         Run the pipeline end-to-end with the given items.
-        
+
         This is a convenience wrapper around `start()`, `feed()`, and `join()`.
 
         Args:
@@ -502,7 +502,7 @@ class Pipeline:
     async def shutdown(self) -> None:
         """
         Shut down the pipeline gracefully or forcefully.
-        
+
         If queues are not empty, this might leave items unprocessed depending on
         how workers react to stop_event.
         """
@@ -648,7 +648,7 @@ class Pipeline:
                     except Exception as e:
                         logger.warning(f"[{name}] Error in skip_if predicate for id={item_id}: {e}")
                         should_skip = False
-                
+
                 if should_skip:
                     logger.info(f"[{name}] SKIP stage={stage.name} id={item_id}")
                     await self._emit_status(item_id, stage.name, "skipped", worker=name)
@@ -667,9 +667,9 @@ class Pipeline:
                             continue
 
                 payload["value"] = result_value
-                
+
                 # Emit completed if not skipped? Or is skipped enough?
-                # "skipped" is the final status for this stage. 
+                # "skipped" is the final status for this stage.
                 # But to trigger "queued" for next stage, we just proceed.
                 if not should_skip:
                     await self._emit_status(item_id, stage.name, "completed", worker=name)
@@ -714,7 +714,9 @@ class Pipeline:
                     except Exception as e:
                         logger.error(f"[{name}] Error in on_success callback: {e}")
 
-                self._items_processed += 1
+                if output_q is None:
+                    self._items_processed += 1
+
                 logger.debug(f"[{name}] END stage={stage.name} id={item_id}")
 
                 processing_time = time.time() - start_time

@@ -60,7 +60,7 @@ async def main():
     print(f"\n✅ Completed! Processed {len(results)} items")
     print("\nFirst 5 results:")
     for result in results[:5]:
-        print(f"  ID {result['id']}: {result['value']}")
+        print(f"  ID {result.id}: {result.value}")
 
     print(f"\nPipeline stats: {pipeline.get_stats()}")
 

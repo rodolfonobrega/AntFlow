@@ -16,10 +16,8 @@ async def process_item(x):
 
 async def main():
     async with AsyncExecutor(max_workers=5) as executor:
-        # Map over items
-        results = []
-        async for result in executor.map(process_item, range(10)):
-            results.append(result)
+        # Map over items - returns list directly
+        results = await executor.map(process_item, range(10))
         print(results)  # [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
 
 asyncio.run(main())
@@ -59,7 +57,8 @@ asyncio.run(main())
 Similar to `concurrent.futures.ThreadPoolExecutor` but for async operations:
 
 - **`submit(fn, *args, **kwargs)`** - Submit a single async task
-- **`map(fn, *iterables)`** - Map function over iterables
+- **`map(fn, *iterables)`** - Map function over iterables, returns list
+- **`map_iter(fn, *iterables)`** - Map function over iterables, yields results (async iterator)
 - **`as_completed(futures)`** - Iterate over futures as they complete
 
 ### Pipeline

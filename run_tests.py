@@ -1,6 +1,7 @@
-import pytest
-import sys
 import logging
+import sys
+
+import pytest
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)

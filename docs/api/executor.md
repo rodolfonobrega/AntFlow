@@ -7,8 +7,10 @@ The `antflow.executor` module provides a familiar interface for concurrent async
 The **[AsyncExecutor][antflow.executor.AsyncExecutor]** manages a pool of workers to execute async functions concurrently. It is ideal for simple parallel processing tasks where you don't need the full complexity of a multi-stage pipeline.
 
 Key features:
+
 - **`submit()`**: Schedule a single task.
-- **`map()`**: Apply a function to an iterable concurrently.
+- **`map()`**: Apply a function to an iterable and return results as a list.
+- **`map_iter()`**: Apply a function to an iterable, yielding results (async iterator).
 - **`as_completed()`**: Iterate over futures as they finish.
 - **`wait()`**: Wait for a collection of futures with flexible conditions.
 
@@ -25,16 +27,20 @@ async def process_item(x):
 async def main():
     # Use as a context manager
     async with AsyncExecutor(max_workers=5) as executor:
-        
+
         # 1. Submit a single task
         future = executor.submit(process_item, 10)
         result = await future.result()
         print(f"Result: {result}")
 
-        # 2. Map over a list
-        async for res in executor.map(process_item, range(5)):
-            print(f"Mapped: {res}")
-            
+        # 2. Map over a list - returns list directly
+        results = await executor.map(process_item, range(5))
+        print(f"Results: {results}")
+
+        # 3. Map with streaming (async iterator)
+        async for res in executor.map_iter(process_item, range(5)):
+            print(f"Streamed: {res}")
+
 asyncio.run(main())
 ```
 

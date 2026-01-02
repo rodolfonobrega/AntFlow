@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, Literal, Optional
 
 TaskFunc = Callable[[Any], Awaitable[Any]]
 StatusType = Literal["queued", "in_progress", "completed", "failed", "retrying", "skipped"]

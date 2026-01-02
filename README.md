@@ -169,12 +169,9 @@ async def process_item(x):
 
 async def main():
     async with AsyncExecutor(max_workers=10) as executor:
-        # Using map() for parallel processing with automatic retry
-        results = []
+        # Using map() - returns list directly (like list(executor.map(...)) in concurrent.futures)
         # retries=3 means it will try up to 4 times total with exponential backoff
-        # max_concurrency=5 limits to 5 concurrent executions (even with 10 workers)
-        async for result in executor.map(process_item, range(100), retries=3, max_concurrency=5):
-            results.append(result)
+        results = await executor.map(process_item, range(100), retries=3)
         print(f"Processed {len(results)} items")
 
 asyncio.run(main())

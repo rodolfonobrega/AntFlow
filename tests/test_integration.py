@@ -38,9 +38,7 @@ class TestIntegration:
             return x * 2
 
         async with AsyncExecutor(max_workers=3) as executor:
-            prepared_items = []
-            async for result in executor.map(create_pipeline_input, range(10)):
-                prepared_items.append(result)
+            prepared_items = await executor.map(create_pipeline_input, range(10))
 
         stage = Stage(
             name="Processing",

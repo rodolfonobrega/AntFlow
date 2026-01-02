@@ -1,7 +1,15 @@
+"""
+Real-time dashboard using callback approach.
+
+This dashboard updates the display in response to status change events
+via the on_status_change callback. The pipeline.get_dashboard_snapshot()
+is called within the callback to get fresh data.
+
+Compare with rich_polling_dashboard.py which uses a polling loop.
+"""
+
 import asyncio
 import random
-from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 from rich.console import Console
 from rich.layout import Layout
@@ -11,204 +19,261 @@ from rich.table import Table
 from rich.text import Text
 
 from antflow import Pipeline, Stage, StatusEvent, StatusTracker
+from antflow.types import DashboardSnapshot
 
-# Initialize Rich Console
 console = Console()
 
-@dataclass
-class WorkerState:
-    name: str
-    stage: str
-    status: str = "IDLE"
-    current_item: Optional[int] = None
-    processed_count: int = 0
-
-# Global state for workers (in a real app, this would be in a class)
-worker_states: Dict[str, WorkerState] = {}
 
 async def fetch_data(item_id: int):
-    """Simulate fetching data."""
-    delay = random.uniform(0.5, 2.0)
+    """Simulate fetching data with random delays."""
+    delay = random.uniform(0.3, 1.0)
     await asyncio.sleep(delay)
+    if random.random() < 0.1:
+        raise ValueError("Connection timeout")
     return f"data_{item_id}"
+
 
 async def process_data(data: str):
     """Simulate processing data."""
-    delay = random.uniform(1.0, 3.0)
+    delay = random.uniform(0.5, 1.5)
     await asyncio.sleep(delay)
-    if random.random() < 0.1:
+    if random.random() < 0.15:
         raise ValueError("Processing error")
     return data.upper()
 
+
 async def save_data(data: str):
     """Simulate saving data."""
-    delay = random.uniform(0.5, 1.5)
+    delay = random.uniform(0.2, 0.8)
     await asyncio.sleep(delay)
+    if random.random() < 0.05:
+        raise ValueError("Database error")
     return f"saved_{data}"
 
-def update_worker_state(event: StatusEvent):
-    """Update local worker state based on event."""
-    if not event.worker:
-        return
 
-    worker_name = event.worker
-    
-    # Initialize if new
-    if worker_name not in worker_states:
-        worker_states[worker_name] = WorkerState(
-            name=worker_name,
-            stage=event.stage or "?"
-        )
-    
-    state = worker_states[worker_name]
-    
-    if event.status == "in_progress":
-        state.status = "BUSY"
-        state.current_item = event.item_id
-    elif event.status in ("completed", "failed"):
-        state.status = "IDLE"
-        state.current_item = None
-        state.processed_count += 1
-
-def generate_layout(pipeline: Pipeline, tracker: StatusTracker, total_items: int) -> Layout:
-    """Generate the dashboard layout."""
-    snapshot = pipeline.get_dashboard_snapshot()
+def generate_dashboard(
+    snapshot: DashboardSnapshot,
+    tracker: StatusTracker,
+    total_items: int
+) -> Layout:
+    """Generate the dashboard layout from snapshot data."""
     stats = snapshot.pipeline_stats
-    
+
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
-        Layout(name="upper", size=16),
+        Layout(name="upper", size=18),
         Layout(name="lower")
     )
-    
+
     layout["header"].update(
-        Panel(Text("AntFlow Callback Dashboard (With Workers)", justify="center", style="bold green"), style="green")
+        Panel(
+            Text("AntFlow Dashboard (Callback)", justify="center", style="bold green"),
+            style="green"
+        )
     )
-    
-    # Upper Section - Split into Stats and Workers
+
     layout["upper"].split_row(
-        Layout(name="stats", ratio=1),
+        Layout(name="left", ratio=1),
         Layout(name="workers", ratio=2)
     )
-    
-    # Stats Table
-    stats_table = Table(title="Statistics", expand=True)
-    stats_table.add_column("Metric", style="cyan")
-    stats_table.add_column("Value", style="magenta")
-    
-    stats_table.add_row("Total Items", str(total_items))
-    stats_table.add_row("Processed", str(stats.items_processed))
-    stats_table.add_row("Failed", str(stats.items_failed))
-    stats_table.add_row("In Flight", str(stats.items_in_flight))
-    
-    # Progress
-    total_ops = total_items * len(pipeline.stages)
-    completed_ops = stats.items_processed + stats.items_failed
-    progress_pct = (completed_ops / total_ops) * 100 if total_ops > 0 else 0
-    stats_table.add_row("Progress", f"{progress_pct:.1f}%")
-    
-    layout["stats"].update(Panel(stats_table, title="Overview"))
-    
-    # Worker Monitor Table (Populated from local state)
+
+    layout["left"].split_column(
+        Layout(name="overview"),
+        Layout(name="stages")
+    )
+
+    overview_table = Table(title="Overview", expand=True, show_header=False)
+    overview_table.add_column("Metric", style="cyan")
+    overview_table.add_column("Value", style="magenta", justify="right")
+
+    completed = stats.items_processed + stats.items_failed
+    progress_pct = (completed / total_items) * 100 if total_items > 0 else 0
+
+    overview_table.add_row("Total Items", str(total_items))
+    overview_table.add_row("Processed", str(stats.items_processed))
+    overview_table.add_row("Failed", str(stats.items_failed))
+    overview_table.add_row("In Flight", str(stats.items_in_flight))
+    overview_table.add_row("Progress", f"{progress_pct:.1f}%")
+
+    layout["overview"].update(Panel(overview_table, border_style="blue"))
+
+    stage_table = Table(title="Stage Metrics", expand=True)
+    stage_table.add_column("Stage", style="cyan")
+    stage_table.add_column("Pend", style="blue", justify="right")
+    stage_table.add_column("Prog", style="yellow", justify="right")
+    stage_table.add_column("Done", style="green", justify="right")
+    stage_table.add_column("Fail", style="red", justify="right")
+
+    for stage_name, stage_stat in stats.stage_stats.items():
+        stage_table.add_row(
+            stage_name,
+            str(stage_stat.pending_items),
+            str(stage_stat.in_progress_items),
+            str(stage_stat.completed_items),
+            str(stage_stat.failed_items)
+        )
+
+    layout["stages"].update(Panel(stage_table, border_style="blue"))
+
     worker_table = Table(title="Worker Monitor", expand=True)
     worker_table.add_column("Worker", style="blue")
     worker_table.add_column("Stage", style="yellow")
     worker_table.add_column("Status", style="white")
-    worker_table.add_column("Current Item", style="cyan")
-    worker_table.add_column("Processed", style="green", justify="right")
-    
-    for name, state in sorted(worker_states.items()):
-        status_style = "bold green" if state.status == "BUSY" else "dim white"
-        current = str(state.current_item) if state.current_item is not None else "-"
-        
+    worker_table.add_column("Item", style="cyan", justify="right")
+    worker_table.add_column("Done", style="green", justify="right")
+    worker_table.add_column("Fail", style="red", justify="right")
+    worker_table.add_column("Avg(s)", style="magenta", justify="right")
+
+    for worker_name, state in sorted(snapshot.worker_states.items()):
+        metrics = snapshot.worker_metrics.get(worker_name)
+        processed = metrics.items_processed if metrics else 0
+        failed = metrics.items_failed if metrics else 0
+        avg_time = metrics.avg_processing_time if metrics else 0.0
+
+        status_style = "bold green" if state.status == "busy" else "dim white"
+        current_item = str(state.current_item_id) if state.current_item_id is not None else "-"
+
         worker_table.add_row(
-            name,
+            worker_name,
             state.stage,
-            Text(state.status, style=status_style),
-            current,
-            str(state.processed_count)
+            Text(state.status.upper(), style=status_style),
+            current_item,
+            str(processed),
+            str(failed),
+            f"{avg_time:.2f}"
         )
-        
-    layout["workers"].update(Panel(worker_table, title="Active Workers"))
-    
-    # Items Table
-    items_table = Table(title="Recent Activity", expand=True)
-    items_table.add_column("ID", style="cyan")
-    items_table.add_column("Status", style="white")
-    items_table.add_column("Stage", style="blue")
+
+    layout["workers"].update(Panel(worker_table, border_style="green"))
+
+    items_table = Table(title="Item Tracker", expand=True)
+    items_table.add_column("ID", style="cyan", width=5)
+    items_table.add_column("Status", style="white", width=12)
+    items_table.add_column("Stage", style="blue", width=10)
+    items_table.add_column("Worker", style="yellow", width=12)
     items_table.add_column("Info", style="dim white")
-    
-    # Show last 15 items
-    start_idx = max(0, total_items - 15)
-    for i in range(start_idx, total_items):
-        status_event = tracker.get_status(i)
+
+    for item_id in range(total_items):
+        status_event = tracker.get_status(item_id)
+
         if status_event:
             status = status_event.status
+            stage = status_event.stage or "-"
+            worker = status_event.worker or "-"
             info = ""
-            
-            if status == "completed":
-                style = "green"
-            elif status == "failed":
+
+            if status == "failed":
                 style = "red"
-                info = str(status_event.metadata.get("error", ""))
+                info = str(status_event.metadata.get("error", ""))[:30]
+            elif status == "completed":
+                style = "green"
             elif status == "in_progress":
                 style = "bold yellow"
             elif status == "retrying":
                 style = "bold magenta"
                 attempt = status_event.metadata.get("attempt", 1)
-                status = f"RETRYING ({attempt-1})"
-                info = str(status_event.metadata.get("error", ""))
+                info = f"attempt {attempt}"
+            elif status == "queued":
+                style = "blue"
             else:
                 style = "white"
-                
-            items_table.add_row(str(i), Text(status.upper(), style=style), status_event.stage or "-", info)
-            
-    layout["lower"].update(Panel(items_table, title="Items"))
-    
+
+            items_table.add_row(
+                str(item_id),
+                Text(status.upper(), style=style),
+                stage,
+                worker,
+                info
+            )
+        else:
+            items_table.add_row(
+                str(item_id),
+                Text("PENDING", style="dim"),
+                "-",
+                "-",
+                ""
+            )
+
+    layout["lower"].update(Panel(items_table, border_style="yellow"))
+
     return layout
 
+
 async def main():
-    # 1. Setup
-    num_items = 50
-    tracker = StatusTracker()
-    
-    stage1 = Stage(name="Fetch", workers=4, tasks=[fetch_data])
-    stage2 = Stage(name="Process", workers=3, tasks=[process_data], retry="per_stage", stage_attempts=3)
-    stage3 = Stage(name="Save", workers=2, tasks=[save_data])
-    
-    pipeline = Pipeline(stages=[stage1, stage2, stage3], status_tracker=tracker)
-    
-    # 2. Define the Callback
-    current_live = None
+    num_items = 30
+
+    live_display = None
+    pipeline_ref = None
+    tracker_ref = None
 
     async def on_status_change(event: StatusEvent):
-        """Callback called whenever an item status changes."""
-        # Update local worker state
-        update_worker_state(event)
-        
-        if current_live:
-            # Re-generate layout and refresh display
-            layout = generate_layout(pipeline, tracker, num_items)
-            current_live.update(layout, refresh=True)
+        """Callback triggered on every status change event."""
+        if live_display and pipeline_ref:
+            snapshot = pipeline_ref.get_dashboard_snapshot()
+            layout = generate_dashboard(snapshot, tracker_ref, num_items)
+            live_display.update(layout)
 
-    # Register the callback
-    tracker.on_status_change = on_status_change
+    tracker = StatusTracker(on_status_change=on_status_change)
+    tracker_ref = tracker
 
-    # 3. Run with Live Display
-    # Initialize layout
-    layout = generate_layout(pipeline, tracker, num_items)
-    
-    with Live(layout, refresh_per_second=4, screen=True) as live:
-        current_live = live
-        
-        # Run the pipeline directly (awaiting it)
-        await pipeline.run([i for i in range(num_items)])
-        
-        # Final update
-        current_live = None
-        
-    console.print("[bold green]Done![/bold green]")
+    stage1 = Stage(
+        name="Fetch",
+        workers=4,
+        tasks=[fetch_data],
+        task_attempts=2,
+        task_wait_seconds=0.1
+    )
+
+    stage2 = Stage(
+        name="Process",
+        workers=3,
+        tasks=[process_data],
+        retry="per_stage",
+        stage_attempts=3,
+        task_wait_seconds=0.2
+    )
+
+    stage3 = Stage(
+        name="Save",
+        workers=2,
+        tasks=[save_data],
+        task_attempts=2,
+        task_wait_seconds=0.1
+    )
+
+    pipeline = Pipeline(
+        stages=[stage1, stage2, stage3],
+        status_tracker=tracker
+    )
+    pipeline_ref = pipeline
+
+    items = list(range(num_items))
+
+    try:
+        initial_snapshot = pipeline.get_dashboard_snapshot()
+        initial_layout = generate_dashboard(initial_snapshot, tracker, num_items)
+
+        with Live(initial_layout, refresh_per_second=4, screen=True) as live:
+            live_display = live
+
+            results = await pipeline.run(items)
+
+            snapshot = pipeline.get_dashboard_snapshot()
+            live.update(generate_dashboard(snapshot, tracker, num_items))
+            await asyncio.sleep(2)
+
+            live_display = None
+
+        console.print("\n[bold green]Processing Complete![/bold green]")
+        console.print(f"Processed: {len(results)} items")
+        console.print(f"Failed: {tracker.get_stats()['failed']} items")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

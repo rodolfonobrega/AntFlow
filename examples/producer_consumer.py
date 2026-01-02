@@ -1,21 +1,31 @@
+"""
+Producer-Consumer pattern example.
+
+Demonstrates how to use the pipeline with asynchronous data generation:
+- start(): Initialize workers in idle state
+- feed_async(): Stream data from an async generator into the pipeline
+- join(): Wait for all items to be processed
+
+This pattern is useful for:
+- Real-time data streams (websockets, Kafka, etc.)
+- Large datasets that don't fit in memory
+- Processing data as it arrives
+"""
 
 import asyncio
 import random
-import time
 from typing import AsyncIterable
 
 from antflow import Pipeline, Stage
 
-# --- 1. The Producer ---
-# This simulates a "data generator" that creates items over time.
-# Perhaps it's reading from a stream, a websocket, or generating calculations.
+
 async def data_producer(count: int = 10) -> AsyncIterable[int]:
     print(f"[Producer] Starting to generate {count} items...")
     for i in range(count):
         # Simulate work to generate data (e.g., fetching from API)
         delay = random.uniform(0.1, 0.5)
         await asyncio.sleep(delay)
-        
+
         print(f"[Producer] Generated item {i}")
         yield i
 
@@ -28,7 +38,7 @@ async def process_data(item: int) -> str:
     # Simulate processing time
     delay = random.uniform(0.5, 1.5)
     await asyncio.sleep(delay)
-    
+
     result = f"processed_{item}"
     print(f"  [Worker] Finished {result} (took {delay:.2f}s)")
     return result
@@ -56,11 +66,11 @@ async def main():
     )
 
     # --- KEY PART: Manually controlling the lifecycle ---
-    
+
     # 1. Start the workers. They will sit idle, waiting for work.
     print("Step 1: Starting pipeline (workers are idle)...")
     await pipeline.start()
-    
+
     # 2. Feed data from our async generator.
     # The pipeline will consume items as they are yielded by the producer.
     print("Step 2: Feeding data from producer...")
@@ -74,7 +84,7 @@ async def main():
     print("\n=== Done! ===")
     print(f"Total processed: {len(pipeline.results)}")
     print(f"Stats: {pipeline.get_stats()}")
-    
+
     print("\nFirst 3 results:")
     for res in pipeline.results[:3]:
         print(f" - {res.value}")

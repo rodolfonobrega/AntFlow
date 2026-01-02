@@ -150,9 +150,7 @@ async def process(x):
 
 async def main():
     async with AsyncExecutor(max_workers=10) as executor:
-        results = []
-        async for result in executor.map(process, range(100)):
-            results.append(result)
+        results = await executor.map(process, range(100))
         print(results)
 
 asyncio.run(main())

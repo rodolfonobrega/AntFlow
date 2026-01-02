@@ -129,7 +129,7 @@ async def main():
         if results:
             print("\nSample results (first 3):")
             for result in results[:3]:
-                print(f"  Item {result['id']}: {result['value']}")
+                print(f"  Item {result.id}: {result.value}")
 
         failed_items = tracker.get_by_status("failed")
         if failed_items:

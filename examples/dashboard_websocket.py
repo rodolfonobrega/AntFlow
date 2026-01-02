@@ -1,17 +1,32 @@
 """
-Real-time dashboard example with WebSocket streaming and Rich UI.
+WebSocket integration pattern example.
 
-This example demonstrates how to build a real-time dashboard
-that monitors pipeline execution via WebSocket, displaying logs
-and metrics in a terminal UI.
+Demonstrates how to integrate AntFlow with a WebSocket server for real-time
+browser-based dashboards. This example uses mock WebSockets to show the pattern.
+
+Key concepts:
+- PipelineDashboard.subscribe(): Register callbacks for status changes
+- PipelineDashboard.get_snapshot(): Get complete pipeline state
+- DashboardServer pattern: Manage multiple WebSocket clients
+- Event forwarding: Stream status changes to connected clients
+
+To use with a real WebSocket framework (e.g., FastAPI):
+1. Replace MockWebSocket with FastAPI's WebSocket
+2. Create an endpoint that calls server.handle_client(websocket)
+3. The rest of the pattern remains the same
+
+Example FastAPI integration:
+    @app.websocket("/ws/{client_id}")
+    async def websocket_endpoint(websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        await server.handle_client(websocket)
 """
 
 import asyncio
-import json
 import random
 import time
 from collections import deque
-from typing import Set, Deque
+from typing import Deque, Set
 
 from rich.console import Console
 from rich.layout import Layout
@@ -131,7 +146,7 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
     """Generate the dashboard layout."""
     snapshot = pipeline.get_dashboard_snapshot()
     stats = snapshot.pipeline_stats
-    
+
     # Main Layout
     layout = Layout()
     layout.split_column(
@@ -139,7 +154,7 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
         Layout(name="upper", size=12),
         Layout(name="logs", ratio=1)
     )
-    
+
     # Header
     layout["header"].update(
         Panel(
@@ -147,30 +162,30 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
             style="cyan"
         )
     )
-    
+
     # Upper Section - Split into Stats and Workers
     layout["upper"].split_row(
         Layout(name="stats", ratio=1),
         Layout(name="workers", ratio=2)
     )
-    
+
     # Stats Table
     stats_table = Table(title="Pipeline Statistics", expand=True)
     stats_table.add_column("Metric", style="cyan")
     stats_table.add_column("Value", style="magenta")
-    
+
     stats_table.add_row("Total Items", str(total_items))
     stats_table.add_row("Processed", str(stats.items_processed))
     stats_table.add_row("Failed", str(stats.items_failed))
     stats_table.add_row("In Flight", str(stats.items_in_flight))
-    
+
     # Calculate progress
     completed_count = stats.items_processed + stats.items_failed
     progress_pct = (completed_count / total_items) * 100 if total_items > 0 else 0
     stats_table.add_row("Progress", f"{progress_pct:.1f}%")
-    
+
     layout["stats"].update(Panel(stats_table, title="Overview"))
-    
+
     # Worker Monitor Table
     worker_table = Table(title="Worker Monitor", expand=True)
     worker_table.add_column("Worker", style="blue")
@@ -178,14 +193,14 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
     worker_table.add_column("Status", style="white")
     worker_table.add_column("Current Item", style="cyan")
     worker_table.add_column("Processed", style="green", justify="right")
-    
+
     for worker_name, state in sorted(snapshot.worker_states.items()):
         metrics = snapshot.worker_metrics.get(worker_name)
         processed = metrics.items_processed if metrics else 0
-        
+
         status_style = "bold green" if state.status == "busy" else "dim white"
         current_item = str(state.current_item_id) if state.current_item_id is not None else "-"
-        
+
         worker_table.add_row(
             worker_name,
             state.stage,
@@ -193,22 +208,22 @@ def generate_dashboard(pipeline: Pipeline, tracker: StatusTracker, total_items: 
             current_item,
             str(processed)
         )
-        
+
     layout["workers"].update(Panel(worker_table, title="Active Workers"))
-    
+
     # Logs Panel
     log_text = Text()
     for msg in log_messages:
         log_text.append(msg + "\n")
-        
+
     layout["logs"].update(Panel(log_text, title="Server Logs", style="white"))
-    
+
     return layout
 
 
 async def main():
     console = Console()
-    
+
     tracker = StatusTracker()
 
     stage1 = Stage(
@@ -235,7 +250,7 @@ async def main():
     # We don't need the Dashboard class for the UI, but we use it for the Server logic
     # Actually, we can just use the pipeline and tracker directly for the UI
     # and keep the server logic separate.
-    
+
     # Initialize Dashboard for Server (logic only)
     dashboard_logic = PipelineDashboard(
         pipeline=pipeline,
@@ -255,7 +270,7 @@ async def main():
     items = range(num_items)
 
     log("Starting pipeline processing...")
-    
+
     pipeline_task = asyncio.create_task(pipeline.run(items))
 
     # Live Dashboard Loop
@@ -264,11 +279,11 @@ async def main():
             while not pipeline_task.done():
                 live.update(generate_dashboard(pipeline, tracker, num_items))
                 await asyncio.sleep(0.2)
-                
+
             # Final update
             live.update(generate_dashboard(pipeline, tracker, num_items))
             await asyncio.sleep(2)
-            
+
     except Exception as e:
         console.print(f"[red]Dashboard Error: {e}[/red]")
 
@@ -276,11 +291,11 @@ async def main():
     await server.disconnect_client(client2)
 
     # Final stats
-    console.print(f"\n[bold green]Processing Complete![/bold green]")
+    console.print("\n[bold green]Processing Complete![/bold green]")
     stats = tracker.get_stats()
     console.print(f"Total processed: {stats['completed']}")
     console.print(f"Total failed: {stats['failed']}")
-    
+
     console.print(f"\nClient 1 received {len(client1.messages)} messages")
     console.print(f"Client 2 received {len(client2.messages)} messages")
 

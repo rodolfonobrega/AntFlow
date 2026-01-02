@@ -1,6 +1,9 @@
 import asyncio
+
 import pytest
+
 from antflow import Pipeline, Stage
+
 
 async def noop(x):
     return x
@@ -12,9 +15,9 @@ async def test_smart_queue_defaults():
     stage1 = Stage("S1", workers=1, tasks=[noop])
     # Case 2: 5 workers -> 50 capacity
     stage2 = Stage("S2", workers=5, tasks=[noop])
-    
+
     pipeline = Pipeline(stages=[stage1, stage2])
-    
+
     # Internal queue access for verification
     # Note: This relies on internal implementation details (_queues)
     assert pipeline._queues[0].maxsize == 10
@@ -25,7 +28,7 @@ async def test_explicit_queue_capacity():
     """Test that explicit queue_capacity overrides defaults."""
     stage = Stage("S1", workers=2, tasks=[noop], queue_capacity=100)
     pipeline = Pipeline(stages=[stage])
-    
+
     assert pipeline._queues[0].maxsize == 100
 
 @pytest.mark.asyncio
@@ -38,17 +41,17 @@ async def test_backpressure_blocking():
     # We won't start the pipeline workers, so items will just sit in the queue.
     stage = Stage("S1", workers=1, tasks=[noop], queue_capacity=2)
     pipeline = Pipeline(stages=[stage])
-    
+
     # Fill the queue (capacity 2)
     # The PriorityQueue logic might depend on how we feed
     # pipeline.feed puts into _queues[0]
-    
+
     await pipeline.feed([1, 2])
-    
+
     # The queue should now be full (size 2)
     assert pipeline._queues[0].qsize() == 2
     assert pipeline._queues[0].full()
-    
+
     # Trying to feed one more item should timeout because the queue is full
     # and no workers are consuming it.
     with pytest.raises(asyncio.TimeoutError):
@@ -69,14 +72,14 @@ async def test_backpressure_propagation():
     # It effectively holds 1 item in process + 2 in queue = 3 items max.
     stage1 = Stage("Producer", workers=1, tasks=[noop])
     stage2 = Stage("Consumer", workers=1, tasks=[slow_task], queue_capacity=2)
-    
+
     pipeline = Pipeline(stages=[stage1, stage2])
-    
+
     items = list(range(10))
     await pipeline.run(items)
-    
+
     stats = pipeline.get_stats()
     print(f"\nStats: {stats}")
-    
+
     # Verify we got results
     assert len(pipeline.results) == 10, f"Expected 10 results, got {len(pipeline.results)}. Stats: {stats}"

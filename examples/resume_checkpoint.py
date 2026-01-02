@@ -1,13 +1,24 @@
+"""
+Checkpoint-based resume example.
+
+Demonstrates how to implement a checkpoint system for pipeline recovery:
+- Track completed stages per item using StatusTracker callbacks
+- On failure, determine which items need to resume from which stage
+- Use feed() with target_stage to inject items mid-pipeline
+
+This pattern is useful for:
+- Long-running pipelines that may be interrupted
+- Exactly-once processing guarantees
+- Recovering from crashes without reprocessing completed work
+"""
 
 import asyncio
 import random
-from typing import Dict, List, Any
 from dataclasses import dataclass
-from antflow import Pipeline, Stage, StatusTracker, TaskEvent
+from typing import Any, Dict, List
 
-# =============================================================================
-# 1. Setup: Define Task Logic
-# =============================================================================
+from antflow import Pipeline, Stage, StatusTracker
+
 
 async def fetch_data(item_id):
     """Stage 1: Simulate fetching data."""
@@ -20,7 +31,7 @@ async def process_data(data):
     # Simulate a random crash if we haven't recovered yet
     if not data.get("recovered", False) and random.random() < 0.3:
          raise RuntimeError(f"Random crash processing {data['id']}!")
-    
+
     data["processed"] = True
     return data
 
@@ -54,11 +65,11 @@ class CheckpointManager:
         Returns: {target_stage_name: [list_of_items]}
         """
         injections = {}
-        
+
         for item_id in all_item_ids:
             sid = str(item_id)
             last_stage = self.db.item_states.get(sid)
-            
+
             if last_stage is None:
                 # Not started, go to first stage
                 target = stages[0]
@@ -73,11 +84,11 @@ class CheckpointManager:
                 except (ValueError, IndexError):
                     print(f"Unknown stage {last_stage}, restarting.")
                     target = stages[0]
-            
+
             if target not in injections:
                 injections[target] = []
             injections[target].append(item_id)
-            
+
         return injections
 
 # Global checkpoint manager
@@ -108,7 +119,7 @@ async def run_pipeline(items_to_inject: Dict[str, List[Any]]):
 
     pipeline = Pipeline([stage1, stage2, stage3], status_tracker=tracker)
 
-    print(f"\n--- Starting Pipeline Run ---")
+    print("\n--- Starting Pipeline Run ---")
     await pipeline.start()
 
     # Inject items into their respective stages
@@ -116,8 +127,8 @@ async def run_pipeline(items_to_inject: Dict[str, List[Any]]):
         if not items:
             continue
         print(f"Injecting {len(items)} items into '{stage_name}'")
-        
-        # NOTE: For this example, we need to reconstruct the payload if we are injecting 
+
+        # NOTE: For this example, we need to reconstruct the payload if we are injecting
         # mid-stream. In a real app, you'd load the partial state from DB.
         # Here we just pass the ID and let the tasks handle it (or mock the data).
         prepared_items = []
@@ -142,17 +153,17 @@ async def run_pipeline(items_to_inject: Dict[str, List[Any]]):
 async def main():
     all_items = list(range(10)) # IDs 0-9
     stages = ["Fetch", "Process", "Save"]
-    
+
     # --- Run 1: specific items will likely fail due to random crash logic ---
     print(">>> RUN 1: Potential Crashes <<<")
     # Initially, all items go to first stage
-    initial_injection = {"Fetch": all_items} 
+    initial_injection = {"Fetch": all_items}
     await run_pipeline(initial_injection)
-    
+
     # --- Determine what failed / is pending ---
     print("\n>>> DETERMINING RESUME STATE <<<")
     injections = ckpt.get_pending_items(all_items, stages)
-    
+
     if not injections:
         print("Everything finished successfully! No resume needed.")
         return
