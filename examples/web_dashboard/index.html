@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AntFlow Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --accent-cyan: #22d3ee;
+            --accent-green: #4ade80;
+            --accent-yellow: #fbbf24;
+            --accent-red: #f87171;
+            --accent-blue: #60a5fa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-badge.idle { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .status-badge.running { background: var(--accent-green); color: var(--bg-primary); }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        input[type="number"] {
+            background: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-family: inherit;
+            width: 120px;
+        }
+
+        button {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.stop { background: var(--accent-red); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            border: 1px solid var(--bg-tertiary);
+        }
+
+        .card-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .progress-container {
+            margin-bottom: 1rem;
+        }
+
+        .progress-bar {
+            height: 1.5rem;
+            background: var(--bg-tertiary);
+            border-radius: 0.5rem;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+            transition: width 0.3s ease;
+            border-radius: 0.5rem;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .stat-value.green { color: var(--accent-green); }
+        .stat-value.red { color: var(--accent-red); }
+        .stat-value.yellow { color: var(--accent-yellow); }
+        .stat-value.blue { color: var(--accent-blue); }
+
+        .stat-label {
+            font-size: 0.625rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        th {
+            font-size: 0.625rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        td { font-size: 0.875rem; }
+
+        .worker-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .worker-status.busy { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+        .worker-status.idle { background: var(--bg-tertiary); }
+
+        .stage-bar {
+            display: flex;
+            height: 0.5rem;
+            border-radius: 0.25rem;
+            overflow: hidden;
+            background: var(--bg-tertiary);
+        }
+
+        .stage-bar-segment {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .stage-bar-segment.completed { background: var(--accent-green); }
+        .stage-bar-segment.active { background: var(--accent-yellow); }
+        .stage-bar-segment.pending { background: var(--accent-blue); }
+        .stage-bar-segment.failed { background: var(--accent-red); }
+
+        .connection-status {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+        }
+
+        .connection-status.connected { border-color: var(--accent-green); }
+        .connection-status.disconnected { border-color: var(--accent-red); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ AntFlow Dashboard</h1>
+            <span id="status-badge" class="status-badge idle">Idle</span>
+        </header>
+
+        <div class="controls">
+            <input type="number" id="num-items" value="100" min="1" max="10000" placeholder="Items">
+            <button id="start-btn" onclick="startPipeline()">Start Pipeline</button>
+            <button id="stop-btn" class="stop" onclick="stopPipeline()" disabled>Stop</button>
+        </div>
+
+        <div class="grid">
+            <div class="card" style="grid-column: span 2;">
+                <div class="card-title">Overall Progress</div>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+                        <span id="progress-text" class="progress-text">0%</span>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div>
+                        <div id="stat-processed" class="stat-value green">0</div>
+                        <div class="stat-label">Processed</div>
+                    </div>
+                    <div>
+                        <div id="stat-failed" class="stat-value red">0</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div>
+                        <div id="stat-inflight" class="stat-value yellow">0</div>
+                        <div class="stat-label">In Flight</div>
+                    </div>
+                    <div>
+                        <div id="stat-remaining" class="stat-value blue">0</div>
+                        <div class="stat-label">Remaining</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Stage Progress</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Stage</th>
+                            <th>Pending</th>
+                            <th>Active</th>
+                            <th>Done</th>
+                            <th>Failed</th>
+                            <th style="width: 40%;">Progress</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stages-table">
+                        <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No data</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Workers</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Worker</th>
+                            <th>Stage</th>
+                            <th>Status</th>
+                            <th>Item</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workers-table">
+                        <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No data</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="connection-status" class="connection-status disconnected">
+        ● Disconnected
+    </div>
+
+    <script>
+        let ws = null;
+        let isRunning = false;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                document.getElementById('connection-status').className = 'connection-status connected';
+                document.getElementById('connection-status').textContent = '● Connected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connection-status').className = 'connection-status disconnected';
+                document.getElementById('connection-status').textContent = '● Disconnected';
+                setTimeout(connect, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateDashboard(data);
+            };
+        }
+
+        function updateDashboard(data) {
+            isRunning = data.is_running;
+
+            // Update status badge
+            const badge = document.getElementById('status-badge');
+            badge.className = `status-badge ${isRunning ? 'running' : 'idle'}`;
+            badge.textContent = isRunning ? 'Running' : 'Idle';
+
+            // Update buttons
+            document.getElementById('start-btn').disabled = isRunning;
+            document.getElementById('stop-btn').disabled = !isRunning;
+
+            // Update progress
+            const { processed, failed, in_flight, total } = data.progress;
+            const completed = processed + failed;
+            const pct = total > 0 ? (completed / total * 100) : 0;
+            const remaining = Math.max(0, total - completed);
+
+            document.getElementById('progress-fill').style.width = `${pct}%`;
+            document.getElementById('progress-text').textContent = `${pct.toFixed(1)}%`;
+            document.getElementById('stat-processed').textContent = processed;
+            document.getElementById('stat-failed').textContent = failed;
+            document.getElementById('stat-inflight').textContent = in_flight;
+            document.getElementById('stat-remaining').textContent = remaining;
+
+            // Update stages table
+            const stagesTable = document.getElementById('stages-table');
+            if (Object.keys(data.stages).length > 0) {
+                stagesTable.innerHTML = Object.entries(data.stages).map(([name, s]) => {
+                    const stageTotal = s.pending + s.active + s.completed + s.failed;
+                    const completedPct = stageTotal > 0 ? (s.completed / stageTotal * 100) : 0;
+                    const activePct = stageTotal > 0 ? (s.active / stageTotal * 100) : 0;
+                    const pendingPct = stageTotal > 0 ? (s.pending / stageTotal * 100) : 0;
+                    const failedPct = stageTotal > 0 ? (s.failed / stageTotal * 100) : 0;
+
+                    return `
+                        <tr>
+                            <td>${name}</td>
+                            <td>${s.pending}</td>
+                            <td>${s.active}</td>
+                            <td>${s.completed}</td>
+                            <td>${s.failed}</td>
+                            <td>
+                                <div class="stage-bar">
+                                    <div class="stage-bar-segment completed" style="width: ${completedPct}%"></div>
+                                    <div class="stage-bar-segment active" style="width: ${activePct}%"></div>
+                                    <div class="stage-bar-segment pending" style="width: ${pendingPct}%"></div>
+                                    <div class="stage-bar-segment failed" style="width: ${failedPct}%"></div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            // Update workers table
+            const workersTable = document.getElementById('workers-table');
+            if (data.workers.length > 0) {
+                workersTable.innerHTML = data.workers.map(w => `
+                    <tr>
+                        <td><span class="worker-status ${w.status}"></span>${w.name}</td>
+                        <td>${w.stage}</td>
+                        <td>${w.status}</td>
+                        <td>${w.current_item !== null ? w.current_item : '-'}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        async function startPipeline() {
+            const numItems = document.getElementById('num-items').value;
+            try {
+                const response = await fetch(`/api/start?num_items=${numItems}`, { method: 'POST' });
+                const data = await response.json();
+                console.log('Started:', data);
+            } catch (error) {
+                console.error('Error starting pipeline:', error);
+            }
+        }
+
+        async function stopPipeline() {
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const data = await response.json();
+                console.log('Stopped:', data);
+            } catch (error) {
+                console.error('Error stopping pipeline:', error);
+            }
+        }
+
+        // Initialize
+        connect();
+    </script>
+</body>
+</html>

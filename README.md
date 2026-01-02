@@ -73,18 +73,24 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 - Failed tasks don't stop the pipeline
 
 ### 📊 **Real-time Monitoring & Dashboards**
+- **Built-in Progress Bar** - Simple `progress=True` flag for terminal progress
+- **Three Dashboard Levels** - Compact, Detailed, and Full dashboards
+- **Custom Dashboards** - Implement `DashboardProtocol` for your own UI
 - **Worker State Tracking** - Know what each worker is doing in real-time
 - **Performance Metrics** - Track items processed, failures, avg time per worker
-- **Task-Level Events** - Monitor individual task retries and failures
-- **Dashboard API** - Query snapshots for live dashboards and UIs
-- **Event Streaming** - Subscribe to status changes via callbacks
+- **Error Summary** - Aggregated error statistics with `get_error_summary()`
 - **StatusTracker** - Real-time item tracking with full history
-- **PipelineDashboard** - Helper for combining queries and events
 
 ### 🎯 **Familiar API**
 - Drop-in async replacement for `concurrent.futures`
 - `submit()`, `map()`, `as_completed()` methods
 - Clean, intuitive interface
+
+### ✨ **Fluent APIs** (NEW)
+- **`Pipeline.quick()`** - One-liner for simple pipelines
+- **`Pipeline.create()`** - Fluent builder pattern
+- **Stage Presets** - `io_bound()`, `cpu_bound()`, `rate_limited()`
+- **Result Streaming** - `pipeline.stream()` for processing results as they complete
 
 ---
 
@@ -113,30 +119,142 @@ pip install antflow
 
 ---
 
-## Quick Example
+## Quick Start
+
+AntFlow offers **three equivalent ways** to create pipelines. Choose based on your needs:
+
+### Method 1: Stage Objects (Full Control)
+
+Use explicit `Stage` objects when you need fine-grained control:
+
+```python
+from antflow import Pipeline, Stage
+
+# Define stages explicitly
+fetch_stage = Stage(name="Fetch", workers=10, tasks=[fetch_data], retry="per_task", task_attempts=3)
+process_stage = Stage(name="Process", workers=5, tasks=[transform])
+save_stage = Stage(name="Save", workers=3, tasks=[save_to_db])
+
+# Build and run pipeline
+pipeline = Pipeline(stages=[fetch_stage, process_stage, save_stage])
+results = await pipeline.run(items, progress=True)
+```
+
+### Method 2: Fluent Builder API (Concise)
+
+Use `Pipeline.create().add()` for a chainable, readable syntax:
+
+```python
+from antflow import Pipeline
+
+results = await (
+    Pipeline.create()
+    .add("Fetch", fetch_data, workers=10, retries=3)
+    .add("Process", transform, workers=5)
+    .add("Save", save_to_db, workers=3)
+    .run(items, progress=True)
+)
+```
+
+### Method 3: Quick One-Liner (Simple Cases)
+
+Use `Pipeline.quick()` for simple scripts:
+
+```python
+from antflow import Pipeline
+
+# Single task
+results = await Pipeline.quick(items, process, workers=10, progress=True)
+
+# Multiple tasks (one stage per task)
+results = await Pipeline.quick(items, [fetch, process, save], workers=5)
+```
+
+### Which Method to Choose?
+
+| Method | When to Use |
+|--------|-------------|
+| **Stage objects** | Fine-grained control, custom callbacks, task concurrency limits |
+| **Fluent API** | Clean multi-stage pipelines, quick prototyping |
+| **Pipeline.quick()** | Simple scripts, single-task processing |
+
+All three methods produce the same result - they're just different ways to express the same thing.
+
+### Stage Presets
+
+Pre-configured stages for common patterns:
+
+```python
+from antflow import Stage
+
+# I/O bound tasks (API calls, file ops) - 10 workers, 3 retries
+stage = Stage.io_bound("Fetch", fetch_data, workers=20)
+
+# CPU bound tasks - workers = CPU count, 1 retry
+stage = Stage.cpu_bound("Process", transform_data)
+
+# Rate-limited APIs - enforces RPS limit
+stage = Stage.rate_limited("API", call_external_api, rps=5)
+```
+
+### Built-in Progress & Dashboards
+
+All display options are **optional**. By default, pipelines run silently.
+
+```python
+# No display (silent) - default
+results = await pipeline.run(items)
+
+# Simple progress bar - shows END-TO-END progress only
+results = await pipeline.run(items, progress=True)
+# [████████████░░░░░░░░░░░░░░░░░░] 42% | 126/300 | 24.5/s
+
+# Compact dashboard - overall progress + current stage activity
+results = await pipeline.run(items, dashboard="compact")
+
+# Detailed dashboard - PER-STAGE progress table (recommended for multi-stage)
+results = await pipeline.run(items, dashboard="detailed")
+
+# Full dashboard - everything + worker states + error log
+results = await pipeline.run(items, dashboard="full")
+```
+
+> **Tip:** For multi-stage pipelines, use `dashboard="detailed"` to see progress per stage and identify bottlenecks.
+
+### Stream Results
+
+Process results as they complete:
+
+```python
+async for result in pipeline.stream(items):
+    print(f"Got: {result.value}")
+    if some_condition:
+        break  # Early exit supported
+```
+
+---
+
+## Traditional API
+
+For full control, use the traditional Stage and Pipeline API:
 
 ```python
 import asyncio
 from antflow import Pipeline, Stage
 
-# Your actual work
 async def upload_batch(batch_data):
-    # Upload to OpenAI API
     return "batch_id"
 
 async def check_status(batch_id):
-    # Check if batch is ready
     return "result_url"
 
 async def download_results(result_url):
-    # Download processed data
     return "processed_data"
 
 async def save_to_db(processed_data):
-    # Save results
     return "saved"
 
-# Build the pipeline
+# Build the pipeline with explicit stages
 upload_stage = Stage(name="Upload", workers=10, tasks=[upload_batch])
 check_stage = Stage(name="Check", workers=10, tasks=[check_status])
 download_stage = Stage(name="Download", workers=10, tasks=[download_results])
@@ -144,12 +262,12 @@ save_stage = Stage(name="Save", workers=5, tasks=[save_to_db])
 
 pipeline = Pipeline(stages=[upload_stage, check_stage, download_stage, save_stage])
 
-# Process batches efficiently
+# Process with progress bar
 batches = ["batch1", "batch2", "batch3"]
-results = await pipeline.run(batches)
+results = await pipeline.run(batches, progress=True)
 ```
 
-**What happens**: Each stage has its own worker pool (10 for Upload, 10 for Check, 10 for Download, 5 for Save). Workers in each stage process tasks independently. As soon as a worker finishes, it picks the next task. No waiting. No idle time. Maximum throughput.
+**What happens**: Each stage has its own worker pool. Workers process tasks independently. As soon as a worker finishes, it picks the next task. No waiting. No idle time. Maximum throughput.
 
 ---
 
@@ -274,7 +392,7 @@ async def main():
 asyncio.run(main())
 ```
 
-See the [examples/](examples/) directory for more advanced usage, including a **Rich Dashboard** example (`examples/rich_polling_dashboard.py`).
+See the [examples/](examples/) directory for more advanced usage, including **built-in dashboards** (`dashboard="compact"`, `"detailed"`, `"full"`) and a **Web Dashboard** example (`examples/web_dashboard/`).
 
 ---
 

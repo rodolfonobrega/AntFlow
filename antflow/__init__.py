@@ -12,10 +12,13 @@ from .exceptions import (
     TaskFailedError,
 )
 from .executor import AsyncExecutor, AsyncFuture, WaitStrategy
-from .pipeline import Pipeline, Stage
+from .pipeline import Pipeline, PipelineBuilder, Stage
 from .tracker import StatusEvent, StatusTracker
 from .types import (
+    DashboardProtocol,
     DashboardSnapshot,
+    ErrorSummary,
+    FailedItem,
     PipelineResult,
     PipelineStats,
     StatusType,
@@ -32,10 +35,14 @@ __all__ = [
     "AsyncExecutor",
     "AsyncFuture",
     "AntFlowError",
+    "DashboardProtocol",
     "DashboardSnapshot",
+    "ErrorSummary",
     "ExecutorShutdownError",
+    "FailedItem",
     "PipelineResult",
     "Pipeline",
+    "PipelineBuilder",
     "PipelineDashboard",
     "PipelineError",
     "PipelineStats",

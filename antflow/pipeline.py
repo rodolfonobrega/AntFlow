@@ -1,10 +1,28 @@
+from __future__ import annotations
+
 import asyncio
+import os
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterable, Callable, Dict, List, Optional, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterable,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from tenacity import retry, stop_after_attempt, wait_fixed
+
+if TYPE_CHECKING:
+    from .types import DashboardProtocol
 
 if sys.version_info >= (3, 11):
     from asyncio import TaskGroup
@@ -15,6 +33,8 @@ from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardSnapshot,
+    ErrorSummary,
+    FailedItem,
     PipelineResult,
     PipelineStats,
     StageStats,
@@ -75,11 +95,328 @@ class Stage:
                 f"Stage '{self.name}' stage_attempts must be at least 1, got {self.stage_attempts}"
             )
 
+    @classmethod
+    def io_bound(
+        cls,
+        name: str,
+        *tasks: TaskFunc,
+        workers: int = 10,
+        retries: int = 3,
+    ) -> "Stage":
+        """
+        Create a stage optimized for I/O bound tasks.
+
+        Good for: API calls, file operations, network requests.
+        Default: 10 workers, 3 retries.
+
+        Args:
+            name: Stage name
+            *tasks: Async task functions
+            workers: Number of workers (default: 10)
+            retries: Number of retry attempts (default: 3)
+
+        Returns:
+            Configured Stage
+
+        Example:
+            ```python
+            stage = Stage.io_bound("Fetch", fetch_data, workers=20)
+            ```
+        """
+        return cls(
+            name=name,
+            workers=workers,
+            tasks=list(tasks),
+            task_attempts=retries,
+            retry="per_task",
+        )
+
+    @classmethod
+    def cpu_bound(
+        cls,
+        name: str,
+        *tasks: TaskFunc,
+        workers: Optional[int] = None,
+        retries: int = 1,
+    ) -> "Stage":
+        """
+        Create a stage optimized for CPU bound tasks.
+
+        Good for: Data processing, transformations, calculations.
+        Default: workers = CPU count, 1 retry.
+
+        Args:
+            name: Stage name
+            *tasks: Async task functions
+            workers: Number of workers (default: CPU count)
+            retries: Number of retry attempts (default: 1)
+
+        Returns:
+            Configured Stage
+
+        Example:
+            ```python
+            stage = Stage.cpu_bound("Process", transform_data)
+            ```
+        """
+        if workers is None:
+            workers = os.cpu_count() or 4
+
+        return cls(
+            name=name,
+            workers=workers,
+            tasks=list(tasks),
+            task_attempts=retries,
+            retry="per_task",
+        )
+
+    @classmethod
+    def rate_limited(
+        cls,
+        name: str,
+        *tasks: TaskFunc,
+        rps: int = 10,
+        retries: int = 3,
+    ) -> "Stage":
+        """
+        Create a stage with rate limiting for API calls.
+
+        Good for: External APIs with rate limits.
+        Uses task_concurrency_limits to enforce the rate limit.
+
+        Args:
+            name: Stage name
+            *tasks: Async task functions
+            rps: Requests per second limit
+            retries: Number of retry attempts (default: 3)
+
+        Returns:
+            Configured Stage
+
+        Example:
+            ```python
+            stage = Stage.rate_limited("API", call_external_api, rps=5)
+            ```
+        """
+        task_list = list(tasks)
+        concurrency_limits = {}
+        if task_list:
+            for task in task_list:
+                task_name = getattr(task, "__name__", "task")
+                concurrency_limits[task_name] = rps
+
+        return cls(
+            name=name,
+            workers=rps,
+            tasks=task_list,
+            task_attempts=retries,
+            retry="per_task",
+            task_concurrency_limits=concurrency_limits,
+        )
+
+
+class PipelineBuilder:
+    """
+    Fluent builder for constructing Pipeline instances.
+
+    Provides a chainable API for building pipelines with less boilerplate.
+
+    Example:
+        ```python
+        results = await (
+            Pipeline.create()
+            .add("Fetch", fetch, workers=10)
+            .add("Process", process, transform, workers=5)
+            .add("Save", save, workers=3)
+            .run(items, progress=True)
+        )
+        ```
+    """
+
+    def __init__(self) -> None:
+        self._stages: List[Stage] = []
+        self._tracker: Optional[StatusTracker] = None
+        self._collect_results: bool = True
+
+    def add(
+        self,
+        name: str,
+        *tasks: TaskFunc,
+        workers: int = 5,
+        retries: int = 3,
+        retry_policy: str = "per_task",
+    ) -> "PipelineBuilder":
+        """
+        Add a stage to the pipeline.
+
+        Args:
+            name: Stage name
+            *tasks: One or more async task functions
+            workers: Number of concurrent workers
+            retries: Number of retry attempts
+            retry_policy: "per_task" or "per_stage"
+
+        Returns:
+            Self for chaining
+        """
+        self._stages.append(
+            Stage(
+                name=name,
+                workers=workers,
+                tasks=list(tasks),
+                task_attempts=retries,
+                retry=retry_policy,
+            )
+        )
+        return self
+
+    def with_tracker(self, tracker: StatusTracker) -> "PipelineBuilder":
+        """
+        Add a status tracker to the pipeline.
+
+        Args:
+            tracker: StatusTracker instance
+
+        Returns:
+            Self for chaining
+        """
+        self._tracker = tracker
+        return self
+
+    def collect_results(self, enabled: bool = True) -> "PipelineBuilder":
+        """
+        Configure whether to collect results.
+
+        Args:
+            enabled: If True, collect results from final stage
+
+        Returns:
+            Self for chaining
+        """
+        self._collect_results = enabled
+        return self
+
+    def build(self) -> "Pipeline":
+        """
+        Build the Pipeline instance.
+
+        Returns:
+            Configured Pipeline
+        """
+        return Pipeline(
+            stages=self._stages,
+            collect_results=self._collect_results,
+            status_tracker=self._tracker,
+        )
+
+    async def run(
+        self,
+        items: Sequence[Any],
+        progress: bool = False,
+        dashboard: Optional[Literal["compact", "detailed", "full"]] = None,
+    ) -> List[PipelineResult]:
+        """
+        Build and run the pipeline.
+
+        Args:
+            items: Items to process
+            progress: Show progress bar
+            dashboard: Dashboard type
+
+        Returns:
+            List of PipelineResult objects
+        """
+        pipeline = self.build()
+        return await pipeline.run(items, progress=progress, dashboard=dashboard)
+
 
 class Pipeline:
     """
     A multi-stage async pipeline with worker pools and flexible retry strategies.
     """
+
+    @classmethod
+    def create(cls) -> PipelineBuilder:
+        """
+        Create a pipeline using the fluent builder API.
+
+        Returns:
+            PipelineBuilder for chaining
+
+        Example:
+            ```python
+            results = await (
+                Pipeline.create()
+                .add("Fetch", fetch, workers=10)
+                .add("Process", process, workers=5)
+                .run(items, progress=True)
+            )
+            ```
+        """
+        return PipelineBuilder()
+
+    @classmethod
+    async def quick(
+        cls,
+        items: Sequence[Any],
+        tasks: Union[TaskFunc, List[TaskFunc]],
+        workers: int = 5,
+        retries: int = 3,
+        progress: bool = False,
+        dashboard: Optional[Literal["compact", "detailed", "full"]] = None,
+    ) -> List[PipelineResult]:
+        """
+        One-liner pipeline for simple use cases.
+
+        Creates a single-stage pipeline if one task is provided,
+        or a multi-stage pipeline with one stage per task if a list is provided.
+
+        Args:
+            items: Items to process
+            tasks: Single task function or list of task functions
+            workers: Number of workers per stage
+            retries: Number of retry attempts per task
+            progress: Show progress bar
+            dashboard: Dashboard type ("compact", "detailed", "full")
+
+        Returns:
+            List of PipelineResult objects
+
+        Example:
+            ```python
+            # Single task
+            results = await Pipeline.quick(items, process, workers=10)
+
+            # Multiple tasks (one stage per task)
+            results = await Pipeline.quick(
+                items,
+                [fetch, process, save],
+                workers=5,
+                progress=True
+            )
+            ```
+        """
+        if callable(tasks) and not isinstance(tasks, list):
+            task_list = [tasks]
+        else:
+            task_list = list(tasks)
+
+        stages = []
+        for i, task in enumerate(task_list):
+            task_name = getattr(task, "__name__", f"Task{i}")
+            stage_name = task_name.replace("_", " ").title().replace(" ", "")
+            stages.append(
+                Stage(
+                    name=stage_name,
+                    workers=workers,
+                    tasks=[task],
+                    task_attempts=retries,
+                )
+            )
+
+        tracker = StatusTracker() if dashboard == "full" else None
+        pipeline = cls(stages=stages, status_tracker=tracker)
+        return await pipeline.run(items, progress=progress, dashboard=dashboard)
 
     def __init__(
         self,
@@ -304,6 +641,34 @@ class Pipeline:
             timestamp=time.time(),
         )
 
+    def get_error_summary(self) -> ErrorSummary:
+        """
+        Get aggregated error information from pipeline execution.
+
+        If a StatusTracker is configured, returns detailed error information.
+        Otherwise, returns a summary based on pipeline-level counts.
+
+        Returns:
+            [ErrorSummary][antflow.types.ErrorSummary] with failure statistics
+
+        Example:
+            ```python
+            summary = pipeline.get_error_summary()
+            print(f"Total failed: {summary.total_failed}")
+            for error_type, count in summary.errors_by_type.items():
+                print(f"  {error_type}: {count}")
+            ```
+        """
+        if self._status_tracker:
+            return self._status_tracker.get_error_summary()
+
+        return ErrorSummary(
+            total_failed=self._items_failed,
+            errors_by_type={},
+            errors_by_stage={},
+            failed_items=[],
+        )
+
     async def feed(
         self,
         items: Sequence[Any],
@@ -482,7 +847,13 @@ class Pipeline:
             logger.error(f"Pipeline backend runner failed: {e}")
             raise
 
-    async def run(self, items: Sequence[Any]) -> List[PipelineResult]:
+    async def run(
+        self,
+        items: Sequence[Any],
+        progress: bool = False,
+        dashboard: Optional[Literal["compact", "detailed", "full"]] = None,
+        custom_dashboard: Optional[DashboardProtocol] = None,
+    ) -> List[PipelineResult]:
         """
         Run the pipeline end-to-end with the given items.
 
@@ -490,14 +861,178 @@ class Pipeline:
 
         Args:
             items: Items to process through the pipeline.
+            progress: Show minimal progress bar (mutually exclusive with dashboard).
+            dashboard: Built-in dashboard type: "compact", "detailed", or "full".
+            custom_dashboard: User-provided dashboard implementing DashboardProtocol.
 
         Returns:
             List of [PipelineResult][antflow.types.PipelineResult] objects.
+
+        Example:
+            ```python
+            # Simple progress bar
+            results = await pipeline.run(items, progress=True)
+
+            # Compact dashboard
+            results = await pipeline.run(items, dashboard="compact")
+
+            # Custom dashboard
+            results = await pipeline.run(items, custom_dashboard=MyDashboard())
+            ```
         """
+        display = self._create_display(progress, dashboard, custom_dashboard)
+
+        if display:
+            display.on_start(self, len(items))
+
         await self.start()
         await self.feed(items)
-        await self.join()
+
+        if display:
+            monitor_task = asyncio.create_task(
+                self._monitor_progress(display, len(items))
+            )
+            await self.join()
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
+
+            display.on_finish(self.results, self.get_error_summary())
+        else:
+            await self.join()
+
         return self.results
+
+    def _create_display(
+        self,
+        progress: bool,
+        dashboard: Optional[str],
+        custom_dashboard: Optional[DashboardProtocol],
+    ) -> Optional[Any]:
+        """Create the appropriate display based on parameters."""
+        if custom_dashboard:
+            return custom_dashboard
+
+        if progress and dashboard:
+            raise ValueError("Cannot use both 'progress' and 'dashboard' parameters")
+
+        if progress:
+            from .display import ProgressDisplay
+            return ProgressDisplay(total=0)
+
+        if dashboard:
+            if dashboard == "compact":
+                from .display import CompactDashboard
+                return CompactDashboard()
+            elif dashboard == "detailed":
+                from .display import DetailedDashboard
+                return DetailedDashboard()
+            elif dashboard == "full":
+                from .display import FullDashboard
+                return FullDashboard()
+            else:
+                raise ValueError(
+                    f"Unknown dashboard type: {dashboard}. "
+                    f"Use 'compact', 'detailed', or 'full'"
+                )
+
+        return None
+
+    async def _monitor_progress(
+        self,
+        display: Any,
+        total_items: int,
+        update_interval: float = 0.1,
+    ) -> None:
+        """Background task that updates the display periodically."""
+        while True:
+            snapshot = self.get_dashboard_snapshot()
+            display.on_update(snapshot)
+            await asyncio.sleep(update_interval)
+
+    async def stream(
+        self,
+        items: Sequence[Any],
+        progress: bool = False,
+    ) -> AsyncIterator[PipelineResult]:
+        """
+        Stream results as they complete.
+
+        Unlike run() which returns all results at once, stream() yields
+        results as soon as they complete. Results are yielded in completion
+        order, not input order.
+
+        Args:
+            items: Items to process through the pipeline
+            progress: Show minimal progress bar
+
+        Yields:
+            PipelineResult objects as they complete
+
+        Example:
+            ```python
+            async for result in pipeline.stream(items):
+                print(f"Got result: {result.value}")
+                if some_condition:
+                    break  # Early exit supported
+            ```
+
+        Note:
+            - Results are yielded in completion order, not input order
+            - Use run() if you need results in input order
+            - Early exit (break) is supported and will shutdown the pipeline
+        """
+        result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue()
+        original_collect = self.collect_results
+
+        self.collect_results = False
+        self._stream_queue = result_queue
+
+        display = None
+        if progress:
+            from .display import ProgressDisplay
+            display = ProgressDisplay(total=len(items))
+            display.on_start(self, len(items))
+
+        await self.start()
+        await self.feed(items)
+
+        items_yielded = 0
+        total_items = len(items)
+
+        async def monitor_and_yield():
+            nonlocal items_yielded
+            while items_yielded < total_items:
+                stats = self.get_stats()
+                completed_total = stats.items_processed + stats.items_failed
+
+                while items_yielded < completed_total:
+                    if self._results:
+                        result = self._results.pop(0)
+                        yield result
+                        items_yielded += 1
+
+                        if display:
+                            snapshot = self.get_dashboard_snapshot()
+                            display.on_update(snapshot)
+
+                await asyncio.sleep(0.05)
+
+        try:
+            self.collect_results = True
+            async for result in monitor_and_yield():
+                yield result
+        finally:
+            self.collect_results = original_collect
+            if hasattr(self, "_stream_queue"):
+                delattr(self, "_stream_queue")
+
+            await self.shutdown()
+
+            if display:
+                display.on_finish([], self.get_error_summary())
 
     async def shutdown(self) -> None:
         """

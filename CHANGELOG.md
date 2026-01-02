@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-01-02
+
+### Added
+
+*   **Built-in Progress Bar:** Added `progress=True` parameter to `Pipeline.run()` for minimal terminal progress visualization.
+*   **Dashboard System:** Three built-in dashboard levels via `dashboard` parameter:
+    *   `"compact"`: Single panel with progress, rate, ETA, and counts.
+    *   `"detailed"`: Per-stage metrics and worker performance.
+    *   `"full"`: Complete monitoring with worker status and item tracking.
+*   **Custom Dashboards:** Added `DashboardProtocol` for implementing custom dashboards via `custom_dashboard` parameter.
+*   **Pipeline.quick():** One-liner API for simple pipelines.
+    *   Single task: `await Pipeline.quick(items, process, workers=5)`
+    *   Multiple tasks: `await Pipeline.quick(items, [fetch, process, save], workers=5)`
+*   **Pipeline Builder:** Fluent API via `Pipeline.create()`:
+    *   Chain `.add()` calls to build stages.
+    *   Configure with `.with_tracker()` and `.collect_results()`.
+    *   Execute with `.run()` or `.build()`.
+*   **Stage Presets:** Pre-configured stage constructors:
+    *   `Stage.io_bound()`: 10 workers, 3 retries (API calls, file I/O).
+    *   `Stage.cpu_bound()`: CPU count workers, 1 retry (computation).
+    *   `Stage.rate_limited()`: Enforced RPS limit (rate-limited APIs).
+*   **Result Streaming:** `Pipeline.stream()` async iterator for processing results as they complete.
+*   **Error Summary:** `get_error_summary()` method on Pipeline and StatusTracker:
+    *   Aggregated error statistics by type and stage.
+    *   Detailed `FailedItem` list with error details.
+*   **New Types:**
+    *   `ErrorSummary`: Aggregated error information.
+    *   `FailedItem`: Individual failure details.
+    *   `DashboardProtocol`: Interface for custom dashboards.
+*   **New Display Module:** `antflow.display` with:
+    *   `ProgressDisplay`: Minimal terminal progress bar.
+    *   `CompactDashboard`: Rich-based compact dashboard.
+    *   `DetailedDashboard`: Rich-based detailed dashboard.
+    *   `FullDashboard`: Rich-based full monitoring dashboard.
+    *   `BaseDashboard`: Abstract base for custom dashboards.
+*   **New Examples:**
+    *   `quick_api.py`: Pipeline.quick() demonstrations.
+    *   `builder_pattern.py`: Fluent builder API usage.
+    *   `stage_presets.py`: Stage preset class methods.
+    *   `streaming_results.py`: Pipeline.stream() usage.
+    *   `dashboard_levels.py`: Comparing dashboard options.
+    *   `custom_dashboard.py`: Custom dashboard implementations.
+*   **New Documentation:**
+    *   `docs/user-guide/progress.md`: Progress bar guide.
+    *   `docs/user-guide/custom-dashboard.md`: Custom dashboard guide.
+    *   `docs/api/display.md`: Display module API reference.
+
+### Changed
+
+*   **Dependencies:** Added `rich>=13.0.0` as a required dependency for dashboard features.
+*   **README:** Updated with new Quick Start section showcasing new APIs.
+
 ## [0.5.0] - 2025-01-02
 
 ### ⚠ BREAKING CHANGES

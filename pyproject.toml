@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antflow"
-version = "0.5.0"
+version = "0.6.0"
 description = "AntFlow: Async execution library with concurrent.futures-style API and advanced pipelines"
 readme = "README.md"
 authors = [{name = "Rodolfo Nobrega", email = "rodolfo@example.com"}]
@@ -12,6 +12,7 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = [
     "tenacity>=8.0.0",
+    "rich>=13.0.0",
     "taskgroup>=0.0.0a4; python_version < '3.11'",
 ]
 keywords = ["antflow", "async", "asyncio", "pipeline", "concurrent", "futures", "executor", "worker-pool"]

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
-from .types import StatusEvent, TaskEvent
+from .types import ErrorSummary, FailedItem, StatusEvent, TaskEvent
 
 StatusType = Literal["queued", "in_progress", "completed", "failed"]
 
@@ -147,3 +148,71 @@ class StatusTracker:
             List of all [StatusEvents][antflow.types.StatusEvent] for the item, in chronological order
         """
         return self._history.get(item_id, [])
+
+    def get_failed_items(self) -> List[FailedItem]:
+        """
+        Get details of all failed items.
+
+        Returns:
+            List of [FailedItem][antflow.types.FailedItem] with failure details
+        """
+        failed_items = []
+
+        for item_id, event in self._current_status.items():
+            if event.status != "failed":
+                continue
+
+            history = self._history.get(item_id, [])
+            attempts = sum(1 for e in history if e.status == "retrying") + 1
+
+            error_str = str(event.metadata.get("error", "Unknown error"))
+            error_type = "Exception"
+
+            if ":" in error_str:
+                parts = error_str.split(":", 1)
+                if parts[0].replace("_", "").replace(" ", "").isalpha():
+                    error_type = parts[0].strip()
+
+            failed_items.append(
+                FailedItem(
+                    item_id=item_id,
+                    error=error_str,
+                    error_type=error_type,
+                    stage=event.stage or "unknown",
+                    attempts=attempts,
+                    timestamp=event.timestamp,
+                )
+            )
+
+        return failed_items
+
+    def get_error_summary(self) -> ErrorSummary:
+        """
+        Get aggregated error information.
+
+        Returns:
+            [ErrorSummary][antflow.types.ErrorSummary] with failure statistics and details
+
+        Example:
+            ```python
+            summary = tracker.get_error_summary()
+            print(f"Total failed: {summary.total_failed}")
+            for error_type, count in summary.errors_by_type.items():
+                print(f"  {error_type}: {count}")
+            ```
+        """
+        failed_items = self.get_failed_items()
+
+        errors_by_type: Dict[str, int] = defaultdict(int)
+        errors_by_stage: Dict[str, int] = defaultdict(int)
+
+        for item in failed_items:
+            errors_by_type[item.error_type] += 1
+            errors_by_stage[item.stage] += 1
+
+        return ErrorSummary(
+            total_failed=len(failed_items),
+            errors_by_type=dict(errors_by_type),
+            errors_by_stage=dict(errors_by_stage),
+            failed_items=failed_items,
+        )

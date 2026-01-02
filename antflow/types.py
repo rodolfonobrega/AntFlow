@@ -1,5 +1,21 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Literal, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
+
+if TYPE_CHECKING:
+    from .pipeline import Pipeline
 
 TaskFunc = Callable[[Any], Awaitable[Any]]
 StatusType = Literal["queued", "in_progress", "completed", "failed", "retrying", "skipped"]
@@ -205,3 +221,103 @@ class StatusEvent:
             except (ValueError, IndexError):
                 return None
         return None
+
+
+@dataclass
+class FailedItem:
+    """
+    Details of a single failed item.
+
+    Attributes:
+        item_id: Unique identifier of the failed item
+        error: Error message string
+        error_type: Type name of the exception
+        stage: Stage where failure occurred
+        attempts: Number of attempts made before failure
+        timestamp: Unix timestamp when failure occurred
+    """
+
+    item_id: Any
+    error: str
+    error_type: str
+    stage: str
+    attempts: int
+    timestamp: float
+
+
+@dataclass
+class ErrorSummary:
+    """
+    Aggregated error information from pipeline execution.
+
+    Attributes:
+        total_failed: Total count of failed items
+        errors_by_type: Count of errors grouped by exception type
+        errors_by_stage: Count of errors grouped by stage name
+        failed_items: List of individual failed item details
+    """
+
+    total_failed: int
+    errors_by_type: Dict[str, int]
+    errors_by_stage: Dict[str, int]
+    failed_items: List[FailedItem]
+
+    def __str__(self) -> str:
+        if self.total_failed == 0:
+            return "No errors occurred"
+
+        lines = [
+            f"ErrorSummary: {self.total_failed} failed items",
+            "",
+            "By type:",
+        ]
+        for error_type, count in sorted(
+            self.errors_by_type.items(), key=lambda x: -x[1]
+        ):
+            lines.append(f"  {error_type}: {count}")
+
+        lines.append("")
+        lines.append("By stage:")
+        for stage, count in sorted(self.errors_by_stage.items(), key=lambda x: -x[1]):
+            lines.append(f"  {stage}: {count}")
+
+        return "\n".join(lines)
+
+
+@runtime_checkable
+class DashboardProtocol(Protocol):
+    """
+    Protocol for custom dashboard implementations.
+
+    Implement this protocol to create custom dashboards that integrate
+    with Pipeline.run()'s dashboard parameter.
+
+    Example:
+        ```python
+        class MyDashboard:
+            def on_start(self, pipeline, total_items):
+                print(f"Starting {total_items} items")
+
+            def on_update(self, snapshot):
+                print(f"Progress: {snapshot.pipeline_stats.items_processed}")
+
+            def on_finish(self, results, summary):
+                print(f"Done! {len(results)} results, {summary.total_failed} failed")
+
+        results = await pipeline.run(items, custom_dashboard=MyDashboard())
+        ```
+    """
+
+    def on_start(self, pipeline: Pipeline, total_items: int) -> None:
+        """Called when pipeline execution starts."""
+        ...
+
+    def on_update(self, snapshot: DashboardSnapshot) -> None:
+        """Called periodically with current pipeline state."""
+        ...
+
+    def on_finish(
+        self, results: List[PipelineResult], summary: ErrorSummary
+    ) -> None:
+        """Called when pipeline execution completes."""
+        ...
