@@ -211,7 +211,7 @@ async def run_with_callbacks():
         stages=[
             Stage(name="Process", workers=3, tasks=[process_item], task_attempts=1)
         ],
-        tracker=tracker,
+        status_tracker=tracker,
     )
 
     results = await pipeline.run(list(range(15)))
