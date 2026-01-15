@@ -149,12 +149,12 @@ if __name__ == "__main__":
 
 Previously, users were forced to use a single stage with task limits to avoid the "firehose" effect. With the introduction of **Automatic Backpressure**, both approaches are now viable.
 
-### Option A: Two Stages (Recommended for Clarity) ✅
+### Option A: Two Stages (Best for Organization) 📂
 
 ```python
-# ✅ Highly recommended: Separates concerns
+# 📂 Best for code organization, but has a small buffer
 stage_upload = Stage("Upload", workers=2, tasks=[upload])
-stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=5)
+stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=1)
 ```
 
 *   **Structure**: `UploadStage (2 workers)` -> `PollingStage (50 workers)`.
