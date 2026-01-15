@@ -158,15 +158,15 @@ stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=5)
 ```
 
 *   **Structure**: `UploadStage (2 workers)` -> `PollingStage (50 workers)`.
-*   **Behavior**: `queue_capacity` is an **additional buffer** for items waiting to be picked up.
-*   **The Math**: With 50 workers and a capacity of 5, the stage can hold **55 items** in total (50 being processed + 5 waiting in line).
-*   **Backpressure**: Once item #56 arrives, the `UploadStage` will block until a poller finishes.
-*   **Result**: Your 50 workers are **always busy** as long as there is work, but you have a strict cap on how many total jobs are "in flight" at the same time.
+*   **The Nuance**: `queue_capacity` is an **additional buffer**. 
+*   **The Math**: With 50 workers and `queue_capacity=1`, you can have **51 items** in flight (50 being monitored + 1 waiting in the queue).
+*   **The Risk**: That 1 item in the queue has already been uploaded, so it is **active but unmonitored**. If you need a strict limit of exactly 50, you would need to set `workers=49` and `capacity=1`, or use Option B.
+*   **Result**: Great for decoupling logic, but requires careful math if your external limits are extremely tight.
 
-### Option B: Single Stage + Task Limits (Compact) ✅
+### Option B: Single Stage + Task Limits (Perfect for Strict Limits) 🏆
 
 ```python
-# ✅ Also works well
+# 🏆 Best for strict limits: No unmonitored items
 stage = Stage(
     "Combined", 
     workers=50, 
@@ -175,10 +175,11 @@ stage = Stage(
 )
 ```
 
-*   **Structure**: One Stage (50 workers total) with `limit={upload: 2}`.
-*   **Behavior**: When all 50 workers are busy polling, no new upload tasks can start. 
-*   **Total "Active" Jobs**: Strictly capped at 50.
-*   **Result**: Fewer stages to manage. However, if all 50 workers are stuck polling, no one can start a new upload even if the rate limit allows it.
+*   **Structure**: One Stage (Exactly 50 workers total).
+*   **Behavior**: A worker only picks up a new item from the input queue when it is completely free.
+*   **Total "Active" Jobs**: Strictly capped at **50**.
+*   **The Benefit**: There is **zero buffer** between upload and poll because they happen sequentially within the same worker. As soon as a job is uploaded, that same worker immediately starts polling it.
+*   **Result**: This is the most precise way to respect a hard limit (like "Exactly 50 jobs") because you never have uploaded items waiting in an internal queue.
 
 ---
 
