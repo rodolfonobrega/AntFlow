@@ -179,6 +179,27 @@ stage = Stage(
 *   **Total "Active" Jobs**: Strictly capped at 50.
 *   **Result**: Fewer stages to manage. However, if all 50 workers are stuck polling, no one can start a new upload even if the rate limit allows it.
 
+---
+
+### The Danger: Life Without Backpressure (The "Firehose" Risk) ❌
+
+To understand why backpressure matters, imagine we have **infinite queues** (which was the default before version 0.6.1).
+
+**The Scenario:**
+1.  **Stage A (Upload)** has 2 workers and takes 1 second per job.
+2.  **Stage B (Polling)** has 50 workers but takes 10 minutes per job (waiting for OpenAI).
+3.  **You feed 1000 items.**
+
+**What happens without Backpressure?**
+*   **Stage A** starts fast. Every 1 second, it finishes 2 uploads and pushes them to **Stage B**.
+*   **Stage B** can only process 50 jobs at a time. The rest (950 jobs) sit in its queue.
+*   **The Trap**: Since Stage A doesn't know Stage B is full, it keeps uploading. After a few minutes, Stage A has successfully uploaded **750 files**.
+*   **The Disaster**: You now have **750 active jobs** on OpenAI, but you only have **50 workers** monitoring them. If jobs fail or finish, you won't know for a long time. You have effectively bypassed your own concurrency intent and might crash your OpenAI account limits or your local memory.
+
+**This is a "Firehose"**: A fast stage drowning a slow stage because there is no way to say *"Stop, I'm full!"*.
+
+---
+
 ### Automatic Backpressure (Smart Limits)
 
 As of version 0.6.1, AntFlow implements **Smart Internal Limits** for all stage queues.
