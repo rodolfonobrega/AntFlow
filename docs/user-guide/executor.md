@@ -39,9 +39,11 @@ async with AsyncExecutor(max_workers=3) as executor:
     print(result)  # 84
 ```
 
-#### Throttling with Semaphores
+#### Task-Level Concurrency Limits
 
-A unique feature of `AsyncExecutor.submit()` is the optional `semaphore` parameter. This allows you to share a specific concurrency limit across multiple tasks, independent of the total `max_workers`.
+A unique feature of `AsyncExecutor.submit()` is the ability to set **granular concurrency limits** using the `semaphore` parameter. This is useful when you have a high worker count for general tasks but need to throttle specific operations (like a rate-limited API).
+
+This limit is independent of the global `max_workers` setting.
 
 **Use Case:** You have 100 workers for general processing, but a specific API call used in your tasks is limited to 5 concurrent requests.
 
