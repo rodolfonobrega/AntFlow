@@ -194,8 +194,8 @@ To understand why backpressure matters, imagine we have **infinite queues** (whi
 **What happens without Backpressure?**
 *   **Stage A** starts fast. Every 1 second, it finishes 2 uploads and pushes them to **Stage B**.
 *   **Stage B** can only process 50 jobs at a time. The rest (950 jobs) sit in its queue.
-*   **The Trap**: Since Stage A doesn't know Stage B is full, it keeps uploading. After 10 minutes, Stage A have finished uploading **all 1000 files**.
-*   **The Disaster**: You now have **1000 active jobs** on OpenAI, but you only have **50 workers** monitoring them. If jobs fail or finish, you won't know for a long time. You have effectively bypassed your own concurrency intent and might crash your OpenAI account limits or your local memory.
+*   **The Trap**: Since Stage A doesn't know Stage B is full, it keeps uploading. After 10 minutes, Stage A has finished uploading **all 1000 files**.
+*   **The Disaster**: You now have **1000 active jobs** on OpenAI, but you only have **50 workers** monitoring them. This means **950 jobs are being processed by OpenAI but are NOT being monitored** by your pipeline while they sit in the queue. If they fail or finish, you won't know until a worker frees up, potentially hours later.
 
 **This is a "Firehose"**: A fast stage drowning a slow stage because there is no way to say *"Stop, I'm full!"*.
 
