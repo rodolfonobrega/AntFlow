@@ -154,13 +154,14 @@ Previously, users were forced to use a single stage with task limits to avoid th
 ```python
 # ✅ Highly recommended: Separates concerns
 stage_upload = Stage("Upload", workers=2, tasks=[upload])
-stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=1)
+stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=5)
 ```
 
 *   **Structure**: `UploadStage (2 workers)` -> `PollingStage (50 workers)`.
-*   **Behavior**: With `queue_capacity=1`, the `Upload` stage will block once the `Polling` stage is busy.
-*   **Total "Active" Jobs**: 2 (uploading) + 1 (queued) + 50 (polling) = 53 jobs max.
-*   **Result**: Clean separation of logic. Your uploaders are dedicated to uploading, and your pollers are dedicated to polling. Backpressure ensures you never exceed the OpenAI capacity.
+*   **Behavior**: `queue_capacity` is an **additional buffer** for items waiting to be picked up.
+*   **The Math**: With 50 workers and a capacity of 5, the stage can hold **55 items** in total (50 being processed + 5 waiting in line).
+*   **Backpressure**: Once item #56 arrives, the `UploadStage` will block until a poller finishes.
+*   **Result**: Your 50 workers are **always busy** as long as there is work, but you have a strict cap on how many total jobs are "in flight" at the same time.
 
 ### Option B: Single Stage + Task Limits (Compact) ✅
 
