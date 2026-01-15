@@ -188,6 +188,7 @@ stage = Stage(
 To understand why backpressure matters, imagine we have **infinite queues** (which was the default before version 0.6.1).
 
 **The Scenario:**
+
 1.  **Stage A (Upload)** has 2 workers and takes 1 second per job.
 2.  **Stage B (Polling)** has 50 workers but takes 10 minutes per job (waiting for OpenAI).
 3.  **You feed 1000 items.**
