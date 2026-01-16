@@ -409,6 +409,16 @@ asyncio.run(main())
 
 See the [examples/](examples/) directory for more advanced usage, including **built-in dashboards** (`dashboard="compact"`, `"detailed"`, `"full"`) and a **Web Dashboard** example (`examples/web_dashboard/`).
 
+### Monitoring: Dashboard vs StatusTracker
+
+AntFlow provides two complementary monitoring mechanisms:
+
+- **Dashboard (Polling)**: Built-in visual monitoring with periodic updates. Perfect for interactive debugging and real-time progress visualization. See [Dashboard Guide](https://rodolfonobrega.github.io/antflow/user-guide/dashboard/).
+
+- **StatusTracker (Event-driven)**: Async callbacks invoked immediately on events. Ideal for logging to external systems, integrating with monitoring tools, and complete event history. See [StatusTracker Guide](https://rodolfonobrega.github.io/antflow/api/tracker/).
+
+See [Monitoring Guide](https://rodolfonobrega.github.io/antflow/user-guide/monitoring/) for a detailed comparison and examples of both mechanisms.
+
 ---
 
 ## Documentation
@@ -423,6 +433,7 @@ AntFlow has comprehensive documentation to help you get started and master advan
 - [AsyncExecutor Guide](https://rodolfonobrega.github.io/antflow/user-guide/executor/) - Using the concurrent.futures-style API
 - [Concurrency Control](https://rodolfonobrega.github.io/antflow/user-guide/concurrency/) - Managing concurrency limits and semaphores
 - [Pipeline Guide](https://rodolfonobrega.github.io/antflow/user-guide/pipeline/) - Building multi-stage workflows
+- [Monitoring Guide](https://rodolfonobrega.github.io/antflow/user-guide/monitoring/) - Dashboard vs StatusTracker comparison
 - [Dashboard Guide](https://rodolfonobrega.github.io/antflow/user-guide/dashboard/) - Real-time monitoring and dashboards
 - [Error Handling](https://rodolfonobrega.github.io/antflow/user-guide/error-handling/) - Managing failures and retries
 - [Worker Tracking](https://rodolfonobrega.github.io/antflow/user-guide/worker-tracking/) - Monitoring individual workers

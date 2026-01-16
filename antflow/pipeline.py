@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -11,6 +11,7 @@ from typing import (
     AsyncIterable,
     AsyncIterator,
     Callable,
+    Deque,
     Dict,
     List,
     Literal,
@@ -29,12 +30,12 @@ if sys.version_info >= (3, 11):
 else:
     from taskgroup import TaskGroup
 
+from .context import worker_state_var
 from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardSnapshot,
     ErrorSummary,
-    FailedItem,
     PipelineResult,
     PipelineStats,
     StageStats,
@@ -43,7 +44,6 @@ from .types import (
     WorkerMetrics,
     WorkerState,
 )
-from .context import worker_state_var
 from .utils import extract_exception, setup_logger
 
 logger = setup_logger(__name__)
@@ -95,7 +95,6 @@ class Stage:
             raise StageValidationError(
                 f"Stage '{self.name}' stage_attempts must be at least 1, got {self.stage_attempts}"
             )
-
 
 
 class PipelineBuilder:
@@ -343,7 +342,7 @@ class Pipeline:
 
             self._queues.append(asyncio.PriorityQueue(maxsize=maxsize))
         self._msg_counter = 0
-        self._results: List[PipelineResult] = []
+        self._results: Deque[PipelineResult] = deque()
         self._sequence_counter = 0
         self._items_processed = 0
         self._items_failed = 0
@@ -387,26 +386,19 @@ class Pipeline:
 
             # In Progress (Busy Workers)
             in_progress = sum(
-                1 for s in worker_states
-                if s.stage == stage.name and s.status == "busy"
+                1 for s in worker_states if s.stage == stage.name and s.status == "busy"
             )
 
             # Completed/Failed (by workers in this stage)
-            completed = sum(
-                m.items_processed for m in worker_metrics_all
-                if m.stage == stage.name
-            )
-            failed = sum(
-                m.items_failed for m in worker_metrics_all
-                if m.stage == stage.name
-            )
+            completed = sum(m.items_processed for m in worker_metrics_all if m.stage == stage.name)
+            failed = sum(m.items_failed for m in worker_metrics_all if m.stage == stage.name)
 
             stage_stats[stage.name] = StageStats(
                 stage_name=stage.name,
                 pending_items=pending,
                 in_progress_items=in_progress,
                 completed_items=completed,
-                failed_items=failed
+                failed_items=failed,
             )
 
         items_in_flight = sum(s.pending_items + s.in_progress_items for s in stage_stats.values())
@@ -553,11 +545,34 @@ class Pipeline:
             failed_items=[],
         )
 
-    async def feed(
+    def _add_result(
         self,
-        items: Sequence[Any],
-        target_stage: Optional[str] = None,
-        priority: int = 100
+        res_id: Any,
+        res_value: Any,
+        seq_id: int,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """
+        Add a result to the appropriate storage.
+
+        If a stream queue is active (set by stream()), results are sent there.
+        Otherwise, if collect_results is True, results are stored in _results.
+
+        Args:
+            res_id: Result ID
+            res_value: Result value
+            seq_id: Sequence ID
+            metadata: Additional metadata
+        """
+        result = PipelineResult(id=res_id, value=res_value, sequence_id=seq_id, metadata=metadata)
+
+        if hasattr(self, "_stream_queue"):
+            self._stream_queue.put_nowait(result)
+        elif self.collect_results:
+            self._results.append(result)
+
+    async def feed(
+        self, items: Sequence[Any], target_stage: Optional[str] = None, priority: int = 100
     ) -> None:
         """
         Feed items into a specific stage of the pipeline.
@@ -595,10 +610,7 @@ class Pipeline:
             await self._emit_status(payload["id"], stage_name, "queued")
 
     async def feed_async(
-        self,
-        items: AsyncIterable[Any],
-        target_stage: Optional[str] = None,
-        priority: int = 100
+        self, items: AsyncIterable[Any], target_stage: Optional[str] = None, priority: int = 100
     ) -> None:
         """
         Feed items from an async iterable into a specific stage.
@@ -712,7 +724,9 @@ class Pipeline:
                     name_prefix = stage.name
                     input_q = self._queues[stage_index]
                     output_q = (
-                        self._queues[stage_index + 1] if stage_index + 1 < len(self._queues) else None
+                        self._queues[stage_index + 1]
+                        if stage_index + 1 < len(self._queues)
+                        else None
                     )
 
                     for i in range(stage.workers):
@@ -819,22 +833,25 @@ class Pipeline:
 
         if progress:
             from .display import ProgressDisplay
+
             return ProgressDisplay(total=0)
 
         if dashboard:
             if dashboard == "compact":
                 from .display import CompactDashboard
+
                 return CompactDashboard()
             elif dashboard == "detailed":
                 from .display import DetailedDashboard
+
                 return DetailedDashboard()
             elif dashboard == "full":
                 from .display import FullDashboard
+
                 return FullDashboard()
             else:
                 raise ValueError(
-                    f"Unknown dashboard type: {dashboard}. "
-                    f"Use 'compact', 'detailed', or 'full'"
+                    f"Unknown dashboard type: {dashboard}. Use 'compact', 'detailed', or 'full'"
                 )
 
         return None
@@ -847,26 +864,26 @@ class Pipeline:
     ) -> None:
         """
         Background task that updates the display periodically.
-        
+
         This method implements the polling mechanism for DashboardProtocol-based displays.
         It runs in a separate asyncio task and continuously:
         1. Calls get_dashboard_snapshot() to get current pipeline state
         2. Calls display.on_update(snapshot) to update the UI
         3. Sleeps for update_interval seconds
         4. Repeats until cancelled
-        
+
         Args:
             display: Dashboard object implementing DashboardProtocol
             total_items: Total number of items being processed
             update_interval: Seconds between updates (default: 0.5)
-        
+
         Performance Notes:
             - get_dashboard_snapshot() is lightweight - just reads current state
             - No events are generated - we only read existing counters/states
             - The loop continues until the task is cancelled (when pipeline finishes)
             - Lower intervals = more responsive UI but higher CPU usage
             - Higher intervals = lower CPU usage but less responsive UI
-        
+
         Efficiency:
             This polling approach is efficient because:
             - Snapshots don't create new objects, just read existing state
@@ -910,16 +927,21 @@ class Pipeline:
             - Results are yielded in completion order, not input order
             - Use run() if you need results in input order
             - Early exit (break) is supported and will shutdown the pipeline
+            - stream() uses an internal queue and does NOT modify `collect_results`
+            - When streaming, results are NOT stored in `_results` regardless of
+              `collect_results` setting
+            - After streaming completes, `_results` remains empty (preserves original
+              `collect_results` setting)
         """
         result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue()
         original_collect = self.collect_results
 
-        self.collect_results = False
         self._stream_queue = result_queue
 
         display = None
         if progress:
             from .display import ProgressDisplay
+
             display = ProgressDisplay(total=len(items))
             display.on_start(self, len(items))
 
@@ -932,29 +954,24 @@ class Pipeline:
         async def monitor_and_yield():
             nonlocal items_yielded
             while items_yielded < total_items:
-                stats = self.get_stats()
-                completed_total = stats.items_processed + stats.items_failed
+                result = await result_queue.get()
 
-                while items_yielded < completed_total:
-                    if self._results:
-                        result = self._results.pop(0)
-                        yield result
-                        items_yielded += 1
+                if result is None:
+                    break
 
-                        if display:
-                            snapshot = self.get_dashboard_snapshot()
-                            display.on_update(snapshot)
+                yield result
+                items_yielded += 1
+                result_queue.task_done()
 
-                await asyncio.sleep(0.05)
+                if display:
+                    snapshot = self.get_dashboard_snapshot()
+                    display.on_update(snapshot)
 
         try:
-            self.collect_results = True
             async for result in monitor_and_yield():
                 yield result
         finally:
-            self.collect_results = original_collect
-            if hasattr(self, "_stream_queue"):
-                delattr(self, "_stream_queue")
+            delattr(self, "_stream_queue")
 
             await self.shutdown()
 
@@ -1112,7 +1129,9 @@ class Pipeline:
             token = worker_state_var.set(self._worker_states[name])
 
             try:
-                logger.debug(f"[{name}] START stage={stage.name} id={item_id} attempt={attempt} prio={priority}")
+                logger.debug(
+                    f"[{name}] START stage={stage.name} id={item_id} attempt={attempt} prio={priority}"
+                )
 
                 # SKIP Logic
                 should_skip = False
@@ -1132,10 +1151,19 @@ class Pipeline:
                     await self._emit_status(item_id, stage.name, "in_progress", worker=name)
 
                     if stage.retry == "per_task":
-                        result_value = await self._run_per_task(stage, payload["value"], name, item_id)
+                        result_value = await self._run_per_task(
+                            stage, payload["value"], name, item_id
+                        )
                     else:
                         result_value = await self._run_per_stage(
-                            stage, payload["value"], name, item_id, payload, attempt, input_q, priority
+                            stage,
+                            payload["value"],
+                            name,
+                            item_id,
+                            payload,
+                            attempt,
+                            input_q,
+                            priority,
                         )
                         if result_value is None:
                             continue
@@ -1161,7 +1189,7 @@ class Pipeline:
                     if next_stage_name:
                         await self._emit_status(item_id, next_stage_name, "queued")
                 else:
-                    if self.collect_results:
+                    if self.collect_results or hasattr(self, "_stream_queue"):
                         # Extract known fields
                         res_id = payload["id"]
                         res_value = payload["value"]
@@ -1173,11 +1201,7 @@ class Pipeline:
                             if k not in ("id", "value", "_sequence_id")
                         }
 
-                        self._results.append(
-                            PipelineResult(
-                                id=res_id, value=res_value, sequence_id=seq_id, metadata=meta
-                            )
-                        )
+                        self._add_result(res_id, res_value, seq_id, meta)
 
                 if stage.on_success:
                     try:

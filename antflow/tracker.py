@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from .types import ErrorSummary, FailedItem, StatusEvent, TaskEvent
-
-StatusType = Literal["queued", "in_progress", "completed", "failed"]
-
-
-
+from .types import ErrorSummary, FailedItem, StatusEvent, StatusType, TaskEvent
 
 
 class StatusTracker:
@@ -39,7 +34,7 @@ class StatusTracker:
         on_task_start: Optional[Callable[[TaskEvent], Awaitable[None]]] = None,
         on_task_complete: Optional[Callable[[TaskEvent], Awaitable[None]]] = None,
         on_task_retry: Optional[Callable[[TaskEvent], Awaitable[None]]] = None,
-        on_task_fail: Optional[Callable[[TaskEvent], Awaitable[None]]] = None
+        on_task_fail: Optional[Callable[[TaskEvent], Awaitable[None]]] = None,
     ):
         """
         Initialize the status tracker.
@@ -113,10 +108,7 @@ class StatusTracker:
         Returns:
             List of [StatusEvents][antflow.types.StatusEvent] for items with the given status
         """
-        return [
-            event for event in self._current_status.values()
-            if event.status == status
-        ]
+        return [event for event in self._current_status.values() if event.status == status]
 
     def get_stats(self) -> Dict[str, int]:
         """
@@ -125,12 +117,7 @@ class StatusTracker:
         Returns:
             Dictionary mapping status names to counts
         """
-        stats: Dict[str, int] = {
-            "queued": 0,
-            "in_progress": 0,
-            "completed": 0,
-            "failed": 0
-        }
+        stats: Dict[str, int] = {"queued": 0, "in_progress": 0, "completed": 0, "failed": 0}
 
         for event in self._current_status.values():
             stats[event.status] += 1

@@ -3,6 +3,7 @@ AntFlow: Async execution library with concurrent.futures-style API and advanced 
 """
 
 from ._version import __version__
+from .context import set_task_status
 from .exceptions import (
     AntFlowError,
     ExecutorShutdownError,
@@ -28,7 +29,6 @@ from .types import (
     WorkerState,
     WorkerStatus,
 )
-from .context import set_task_status
 
 __all__ = [
     "__version__",

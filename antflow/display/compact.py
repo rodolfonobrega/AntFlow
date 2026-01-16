@@ -123,7 +123,7 @@ class CompactDashboard(BaseDashboard):
         table.add_row(Text(f"  {stage_info}", style="yellow"))
 
         rate_text = Text()
-        rate_text.append(f"  Rate: ", style="dim")
+        rate_text.append("  Rate: ", style="dim")
         rate_text.append(f"{rate:.1f}", style="green")
         rate_text.append(" items/sec | ETA: ", style="dim")
         rate_text.append(eta, style="green")

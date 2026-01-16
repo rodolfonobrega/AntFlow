@@ -5,7 +5,7 @@ Full dashboard using Rich library with complete monitoring capabilities.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from rich.console import Console
 from rich.layout import Layout
@@ -294,11 +294,11 @@ class FullDashboard(BaseDashboard):
 
         if summary.total_failed == 0:
             self.console.print(
-                f"[bold green]Status:[/bold green] Completed successfully"
+                "[bold green]Status:[/bold green] Completed successfully"
             )
         else:
             self.console.print(
-                f"[bold yellow]Status:[/bold yellow] Completed with errors"
+                "[bold yellow]Status:[/bold yellow] Completed with errors"
             )
 
         self.console.print(f"[bold]Total items:[/bold] {self.total}")
