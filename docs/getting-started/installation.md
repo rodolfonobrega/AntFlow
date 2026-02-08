@@ -8,14 +8,14 @@
 ## Install from PyPI
 
 ```bash
-pip install antflow
+pip install AntFlow
 ```
 
 ## Install from Source
 
 ```bash
-git clone https://github.com/rodolfonobrega/antflow.git
-cd antflow
+git clone https://github.com/rodolfonobrega/AntFlow.git
+cd AntFlow
 pip install -e ".[dev]"
 ```
 

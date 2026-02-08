@@ -13,8 +13,8 @@ Thank you for your interest in contributing to AntFlow! This document provides g
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/rodolfonobrega/antflow.git
-cd antflow
+git clone https://github.com/rodolfonobrega/AntFlow.git
+cd AntFlow
 ```
 
 2. Install in development mode with dev dependencies:

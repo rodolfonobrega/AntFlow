@@ -113,7 +113,7 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 ## Quick Install
 
 ```bash
-pip install antflow
+pip install AntFlow
 ```
 
 ---
@@ -413,11 +413,11 @@ See the [examples/](examples/) directory for more advanced usage, including **bu
 
 AntFlow provides two complementary monitoring mechanisms:
 
-- **Dashboard (Polling)**: Built-in visual monitoring with periodic updates. Perfect for interactive debugging and real-time progress visualization. See [Dashboard Guide](https://rodolfonobrega.github.io/antflow/user-guide/dashboard/).
+- **Dashboard (Polling)**: Built-in visual monitoring with periodic updates. Perfect for interactive debugging and real-time progress visualization. See [Dashboard Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/dashboard/).
 
-- **StatusTracker (Event-driven)**: Async callbacks invoked immediately on events. Ideal for logging to external systems, integrating with monitoring tools, and complete event history. See [StatusTracker Guide](https://rodolfonobrega.github.io/antflow/api/tracker/).
+- **StatusTracker (Event-driven)**: Async callbacks invoked immediately on events. Ideal for logging to external systems, integrating with monitoring tools, and complete event history. See [StatusTracker Guide](https://rodolfonobrega.github.io/AntFlow/api/tracker/).
 
-See [Monitoring Guide](https://rodolfonobrega.github.io/antflow/user-guide/monitoring/) for a detailed comparison and examples of both mechanisms.
+See [Monitoring Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/monitoring/) for a detailed comparison and examples of both mechanisms.
 
 ---
 
@@ -426,31 +426,31 @@ See [Monitoring Guide](https://rodolfonobrega.github.io/antflow/user-guide/monit
 AntFlow has comprehensive documentation to help you get started and master advanced features:
 
 ### 🚀 Getting Started
-- [Quick Start Guide](https://rodolfonobrega.github.io/antflow/getting-started/quickstart/) - Get up and running in minutes
-- [Installation Guide](https://rodolfonobrega.github.io/antflow/getting-started/installation/) - Installation instructions
+- [Quick Start Guide](https://rodolfonobrega.github.io/AntFlow/getting-started/quickstart/) - Get up and running in minutes
+- [Installation Guide](https://rodolfonobrega.github.io/AntFlow/getting-started/installation/) - Installation instructions
 
 ### 📚 User Guides
-- [AsyncExecutor Guide](https://rodolfonobrega.github.io/antflow/user-guide/executor/) - Using the concurrent.futures-style API
-- [Concurrency Control](https://rodolfonobrega.github.io/antflow/user-guide/concurrency/) - Managing concurrency limits and semaphores
-- [Pipeline Guide](https://rodolfonobrega.github.io/antflow/user-guide/pipeline/) - Building multi-stage workflows
-- [Monitoring Guide](https://rodolfonobrega.github.io/antflow/user-guide/monitoring/) - Dashboard vs StatusTracker comparison
-- [Dashboard Guide](https://rodolfonobrega.github.io/antflow/user-guide/dashboard/) - Real-time monitoring and dashboards
-- [Error Handling](https://rodolfonobrega.github.io/antflow/user-guide/error-handling/) - Managing failures and retries
-- [Worker Tracking](https://rodolfonobrega.github.io/antflow/user-guide/worker-tracking/) - Monitoring individual workers
+- [AsyncExecutor Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/executor/) - Using the concurrent.futures-style API
+- [Concurrency Control](https://rodolfonobrega.github.io/AntFlow/user-guide/concurrency/) - Managing concurrency limits and semaphores
+- [Pipeline Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/pipeline/) - Building multi-stage workflows
+- [Monitoring Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/monitoring/) - Dashboard vs StatusTracker comparison
+- [Dashboard Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/dashboard/) - Real-time monitoring and dashboards
+- [Error Handling](https://rodolfonobrega.github.io/AntFlow/user-guide/error-handling/) - Managing failures and retries
+- [Worker Tracking](https://rodolfonobrega.github.io/AntFlow/user-guide/worker-tracking/) - Monitoring individual workers
 
 ### 💡 Examples
-- [Examples Index](https://rodolfonobrega.github.io/antflow/examples/) - **Start Here**: List of all 11+ example scripts
-- [Basic Examples](https://rodolfonobrega.github.io/antflow/examples/basic/) - Simple use cases to get started
-- [Advanced Examples](https://rodolfonobrega.github.io/antflow/examples/advanced/) - Complex workflows and patterns
+- [Examples Index](https://rodolfonobrega.github.io/AntFlow/examples/) - **Start Here**: List of all 11+ example scripts
+- [Basic Examples](https://rodolfonobrega.github.io/AntFlow/examples/basic/) - Simple use cases to get started
+- [Advanced Examples](https://rodolfonobrega.github.io/AntFlow/examples/advanced/) - Complex workflows and patterns
 
 ### 📖 API Reference
-- [API Index](https://rodolfonobrega.github.io/antflow/api/) - Complete API documentation
-- [AsyncExecutor](https://rodolfonobrega.github.io/antflow/api/executor/) - Executor API reference
-- [Pipeline](https://rodolfonobrega.github.io/antflow/api/pipeline/) - Pipeline API reference
-- [StatusTracker](https://rodolfonobrega.github.io/antflow/api/tracker/) - Status tracking and monitoring
-- [Exceptions](https://rodolfonobrega.github.io/antflow/api/exceptions/) - Exception types
-- [Types](https://rodolfonobrega.github.io/antflow/api/types/) - Type definitions
-- [Utils](https://rodolfonobrega.github.io/antflow/api/utils/) - Utility functions
+- [API Index](https://rodolfonobrega.github.io/AntFlow/api/) - Complete API documentation
+- [AsyncExecutor](https://rodolfonobrega.github.io/AntFlow/api/executor/) - Executor API reference
+- [Pipeline](https://rodolfonobrega.github.io/AntFlow/api/pipeline/) - Pipeline API reference
+- [StatusTracker](https://rodolfonobrega.github.io/AntFlow/api/tracker/) - Status tracking and monitoring
+- [Exceptions](https://rodolfonobrega.github.io/AntFlow/api/exceptions/) - Exception types
+- [Types](https://rodolfonobrega.github.io/AntFlow/api/types/) - Type definitions
+- [Utils](https://rodolfonobrega.github.io/AntFlow/api/utils/) - Utility functions
 
 You can also build and serve the documentation locally using `mkdocs`:
 

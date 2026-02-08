@@ -1,8 +1,8 @@
 site_name: AntFlow Documentation
 site_description: AntFlow - Async execution library with concurrent.futures-style API and advanced pipelines
-site_url: https://rodolfonobrega.github.io/antflow
-repo_url: https://github.com/rodolfonobrega/antflow
-repo_name: rodolfonobrega/antflow
+site_url: https://rodolfonobrega.github.io/AntFlow
+repo_url: https://github.com/rodolfonobrega/AntFlow
+repo_name: rodolfonobrega/AntFlow
 
 theme:
   name: material

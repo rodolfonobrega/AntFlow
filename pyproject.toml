@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "antflow"
+name = "AntFlow"
 version = "0.7.2"
 description = "AntFlow: Async execution library with concurrent.futures-style API and advanced pipelines"
 readme = "README.md"
@@ -15,7 +15,7 @@ dependencies = [
     "rich>=13.0.0",
     "taskgroup>=0.0.0a4; python_version < '3.11'",
 ]
-keywords = ["antflow", "async", "asyncio", "pipeline", "concurrent", "futures", "executor", "worker-pool"]
+keywords = ["AntFlow", "async", "asyncio", "pipeline", "concurrent", "futures", "executor", "worker-pool"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -45,10 +45,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rodolfonobrega/antflow"
-Documentation = "https://rodolfonobrega.github.io/antflow"
-Repository = "https://github.com/rodolfonobrega/antflow"
-Issues = "https://github.com/rodolfonobrega/antflow/issues"
+Homepage = "https://github.com/rodolfonobrega/AntFlow"
+Documentation = "https://rodolfonobrega.github.io/AntFlow"
+Repository = "https://github.com/rodolfonobrega/AntFlow"
+Issues = "https://github.com/rodolfonobrega/AntFlow/issues"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
