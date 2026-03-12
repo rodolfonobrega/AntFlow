@@ -25,7 +25,7 @@ If the `AntFlow` project already exists on PyPI:
 2. Go to `Manage -> Publishing`
 3. Add a GitHub Actions trusted publisher with:
    - Owner: `rodolfonobrega`
-   - Repository name: `antflow`
+   - Repository name: `AntFlow`
    - Workflow name: `pypi.yml`
    - Environment name: `pypi`
 
