@@ -37,10 +37,23 @@ If the project does not exist on PyPI yet:
 
 ## Release flow
 
+### Option A: Use the release script
+
+Run:
+
+```bash
+./scripts/release.sh 0.7.3
+```
+
+The script updates the version in `pyproject.toml` and `antflow/_version.py`, commits, pushes, creates the `v0.7.3` tag, pushes the tag, and publishes the GitHub Release.
+
+### Option B: Manual release
+
 1. Update `project.version` in `pyproject.toml`
-2. Commit and push the version change
-3. Create a Git tag that matches the version, for example `v0.7.3`
-4. Publish a GitHub Release for that tag
+2. Update `__version__` in `antflow/_version.py`
+3. Commit and push the version change
+4. Create a Git tag that matches the version, for example `v0.7.3`
+5. Publish a GitHub Release for that tag
 
 When the release is published, `.github/workflows/pypi.yml` will:
 
