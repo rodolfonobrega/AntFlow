@@ -45,10 +45,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rodolfonobrega/AntFlow"
+Homepage = "https://github.com/rodolfonobrega/antflow"
 Documentation = "https://rodolfonobrega.github.io/AntFlow"
-Repository = "https://github.com/rodolfonobrega/AntFlow"
-Issues = "https://github.com/rodolfonobrega/AntFlow/issues"
+Repository = "https://github.com/rodolfonobrega/antflow"
+Issues = "https://github.com/rodolfonobrega/antflow/issues"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
