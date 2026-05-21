@@ -17,7 +17,7 @@ try:
 except ImportError:
     pass
 del _sys
-from .context import set_task_status
+from .context import rate_limit, set_task_status
 from .exceptions import (
     AntFlowError,
     ExecutorShutdownError,
@@ -26,7 +26,7 @@ from .exceptions import (
     TaskFailedError,
 )
 from .executor import AsyncExecutor, AsyncFuture, WaitStrategy
-from .pipeline import Pipeline, PipelineBuilder, RendezvousChannel, Stage
+from .pipeline import Pipeline, PipelineBuilder, Stage
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardProtocol,
@@ -57,7 +57,6 @@ __all__ = [
     "PipelineResult",
     "Pipeline",
     "PipelineBuilder",
-    "RendezvousChannel",
     "PipelineError",
     "PipelineStats",
     "Stage",
@@ -73,5 +72,6 @@ __all__ = [
     "WorkerMetrics",
     "WorkerState",
     "WorkerStatus",
+    "rate_limit",
     "set_task_status",
 ]

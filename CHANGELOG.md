@@ -13,9 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     *   Use case: polling-heavy pipelines (e.g. OpenAI Batch API) where submitted jobs must never sit unmonitored in a queue.
     *   `workers=N` becomes a hard cap on items in-flight, with no `queue_capacity` tuning required.
     *   Incompatible with `retry="per_stage"`. Cannot be used on the first stage.
-*   **`RendezvousChannel`:** The zero-buffer pull channel is now exported from `antflow` for advanced use cases.
-*   **`PullBatchPipeline` example:** `examples/openai_batch_prefetch.py` now contains two side-by-side implementations — the original sweeper-based `OpenAIBatchPipeline` and the new `PullBatchPipeline` — with a detailed docstring comparing when to use each.
-*   **`examples/pull_stage_openai_batch.py`:** Standalone example demonstrating `pull=True` with an upload-prefetch buffer and a combined submit+poll stage.
+*   **`RendezvousChannel`:** The zero-buffer pull channel used internally by `pull=True` stages. Not part of the public API — use `pull=True` on a `Stage` instead.
+*   **Call Concurrency (`call_concurrency` + `rate_limit()`):** New `Stage` parameter that limits concurrent API calls *within* long-running tasks. Unlike `task_concurrency_limits` (which limits how many tasks start), `call_concurrency` lets all workers run simultaneously but throttles specific calls wrapped by `async with rate_limit():`. Ideal for polling loops where many workers monitor jobs but only N API calls should happen at once.
+    *   Set `call_concurrency=N` on the Stage.
+    *   Wrap API calls inside the task with `async with rate_limit():`.
+    *   Workers sleeping between polls do NOT hold a rate-limit slot.
+    *   Exported: `from antflow.context import rate_limit` (also available as `from antflow import rate_limit`).
+*   **`PullBatchPipeline` example:** `examples/openai_batch_prefetch.py` now contains two side-by-side implementations — the original sweeper-based `OpenAIBatchPipeline` and the new `PullBatchPipeline` — with a detailed docstring comparing when to use each. Updated to use `call_concurrency` instead of manual semaphores.
+*   **`examples/pull_stage_openai_batch.py`:** Standalone example demonstrating `pull=True` + `call_concurrency` with an upload-prefetch buffer and a combined submit+poll stage.
+*   **`examples/batch_api_simulation.py`:** Simulation script comparing different concurrency approaches (manual semaphore, `task_concurrency_limits`, `call_concurrency`) for the batch-API polling use case.
 *   **Auto fast event loop:** The pipeline now automatically selects the fastest available event loop policy on supported platforms.
 
 ### Fixed
@@ -23,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 *   **`on_failure` not called in `per_stage` mode** — callback was silently skipped when `retry="per_stage"`.
 *   **`on_success` fired for skipped items** — callback was incorrectly invoked even when `skip_if` returned `True`.
 *   **`on_skip` not fired for skipped items** — callback was never invoked.
+*   **`RendezvousChannel` race condition in `get()`** — when `put()` resolved a demand future in the same event-loop tick as a `wait_for` timeout, the item was lost and `join()` hung forever. Now if the future was resolved before the cancellation propagated, `get()` returns the value instead of re-raising.
+*   **`RendezvousChannel` shutdown hang** — `put()` blocked forever when `close()` was called while a producer was waiting for demand. Now uses a `_closed` flag checked on each iteration of the `put()` loop.
 *   **`shutdown()` silently discarded items** — now logs a `WARNING` with the count of discarded items.
 *   **Deadlock in `per_stage` retry when `workers == queue_capacity`** — all workers could block simultaneously trying to re-queue retries into a full input queue. Retries now go through a dedicated unbounded overflow queue.
 *   **`task_concurrency_limits` accepted unknown task names** — now raises `StageValidationError` at construction time instead of silently ignoring the limit.

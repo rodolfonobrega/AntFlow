@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from antflow import Pipeline, Stage
+from antflow.context import rate_limit
 
 
 # ---------------------------------------------------------------------------
@@ -292,11 +293,11 @@ class OpenAIBatchPipeline:
 
 class PullBatchPipeline:
     """
-    Upload-prefetch + pull=True pipeline.
+    Upload-prefetch + pull=True + call_concurrency pipeline.
 
     A job is only submitted when a worker is free to monitor it immediately,
-    so no job is ever left unobserved.  A shared semaphore limits concurrent
-    poll API calls the same way the sweeper does in OpenAIBatchPipeline.
+    so no job is ever left unobserved.  ``call_concurrency`` limits concurrent
+    poll API calls without requiring a manual semaphore — AntFlow manages it.
 
     Args:
         upload_workers:   concurrent upload workers (default 2).
@@ -326,24 +327,19 @@ class PullBatchPipeline:
         self._poll_fn = poll_fn or openai_poll_batch
         self._download_fn = download_fn or openai_download
 
-        # Caps concurrent poll API calls shared across all workers.
-        self._poll_sem = asyncio.Semaphore(poll_parallelism)
-
         self._pipeline = Pipeline(stages=[
             Stage(
                 name="upload",
                 workers=upload_workers,
                 tasks=[self._upload],
-                queue_capacity=upload_prefetch,  # pre-upload buffer
+                queue_capacity=upload_prefetch,
             ),
-            # pull=True: a file is only handed to this worker when it is free.
-            # The worker submits and polls until done — no job sits unmonitored.
-            # max_in_flight workers == hard cap on jobs in-flight on OpenAI.
             Stage(
                 name="submit_and_poll",
                 workers=max_in_flight,
                 tasks=[self._submit_and_poll],
                 pull=True,
+                call_concurrency=poll_parallelism,
             ),
             Stage(
                 name="download",
@@ -370,7 +366,7 @@ class PullBatchPipeline:
         attempts = 0
         while True:
             attempts += 1
-            async with self._poll_sem:
+            async with rate_limit():
                 status, result_ref = await self._poll_fn(job.openai_batch_id)
             if status == "complete":
                 print(f"[poll]    {job.job_id} done after {attempts} attempt(s)")

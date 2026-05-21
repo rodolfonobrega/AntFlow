@@ -90,7 +90,7 @@ The `Stage` class is the building block of your pipeline. Here are all the avail
 | **`task_attempts`** | `int` | `3` | Max attempts per task (used in `"per_task"` mode). |
 | **`stage_attempts`** | `int` | `3` | Max attempts per stage (used in `"per_stage"` mode). |
 | **`task_wait_seconds`** | `float` | `1.0` | Time to wait between retries. |
-| **`task_concurrency_limits`** | `Dict[str, int]` | `None` | Max concurrent executions for specific task functions (see example below). |
+| **`task_concurrency_limits`** | `Dict[str, int]` | `None` | Max concurrent executions for specific task functions. Wraps the **entire function** — the slot is held from entry to return. Only suitable for short tasks in multi-task stages. For long-running tasks with internal loops, use `call_concurrency` instead. |
 | **`unpack_args`** | `bool` | `False` | If `True`, unpacks the input item (`*args`/`**kwargs`) when calling the first task. |
 | **`on_success`** | `Callable` | `None` | Callback or `async` function to run on successful item completion. Signature: `(item_id, result, metadata)`. Not called for skipped items. |
 | **`on_failure`** | `Callable` | `None` | Callback or `async` function to run on item failure (after all retries). Signature: `(item_id, error, metadata)`. Works in both `per_task` and `per_stage` modes. |
@@ -98,10 +98,27 @@ The `Stage` class is the building block of your pipeline. Here are all the avail
 | **`skip_if`** | `Callable` | `None` | Predicate function `(item) -> bool`. If `True`, the item skips this stage entirely. |
 | **`queue_capacity`** | `int` | `None` | Optional. Manually set input queue size. If `None` (default), uses smart limit (`workers * 10`). Set to `0` for infinite. |
 | **`pull`** | `bool` | `False` | Demand-driven mode. Workers pull items from upstream only when ready — upstream is blocked until a worker requests the next item. See [Pull Stages](#pull-stages). Incompatible with `retry="per_stage"`. Cannot be used on the first stage. |
+| **`call_concurrency`** | `int` | `None` | Max concurrent calls *within* running tasks. Unlike `task_concurrency_limits` (which limits how many tasks start), this limits calls inside long-running tasks via `rate_limit()`. See [Call Concurrency](#call-concurrency). |
+
+### Important: task_concurrency_limits wraps the ENTIRE function
+
+> **Warning:** `task_concurrency_limits` holds the semaphore from function entry to function return. If your task has an internal loop (polling, retrying, streaming), the slot is occupied the **entire time** — including during `await asyncio.sleep()`. This effectively reduces your concurrency to N, making the extra workers useless.
+>
+> For long-running tasks with internal loops, use [`call_concurrency`](#call-concurrency) instead.
+
+**Example of misuse:**
+
+```python
+# BROKEN — only 5 workers will ever run. The other 495 are blocked.
+Stage("Poll", workers=500, tasks=[poll_until_done],
+      task_concurrency_limits={"poll_until_done": 5})
+```
+
+The semaphore wraps `poll_until_done` from start to return. If it polls for 5 minutes, the slot is held for 5 minutes — even during sleep.
 
 ### Use Case: OpenAI Batch Processing
 
-`task_concurrency_limits` is powerful when you have a large worker pool for general processing but need to throttle specific operations (like API uploads) due to strict rate limits.
+`task_concurrency_limits` is powerful when you have a large worker pool for general processing but need to throttle specific operations (like API uploads) due to strict rate limits. **The key requirement: each limited task must be short-lived (do one thing and return).**
 
 **Scenario:**
 You have 1000 jobs to process using OpenAI's Batch API.
@@ -316,6 +333,123 @@ results = await pipeline.run(urls)
 
 - Cannot be used on the **first** stage (raises `PipelineError`).
 - Incompatible with `retry="per_stage"` (raises `StageValidationError`).
+
+---
+
+## Call Concurrency
+
+`call_concurrency` limits concurrent API calls **within** long-running tasks — without blocking the entire task from running. This is different from `task_concurrency_limits`, which limits how many tasks *start* at once.
+
+### The problem
+
+Imagine a batch-processing pipeline:
+- 500 workers monitoring jobs on OpenAI (polling until done)
+- Each poll is a quick API call, but OpenAI limits you to 5 concurrent requests
+
+With `task_concurrency_limits={"poll_job": 5}`, only 5 workers would run at a time — meaning only 5 jobs are being monitored. The remaining 495 workers wait idle. This defeats the purpose of having 500 workers.
+
+What you actually want: all 500 workers alive (each monitoring its job), but only 5 making API calls simultaneously. Workers sleep between polls without holding any rate-limit slot.
+
+### Solution: `call_concurrency` + `rate_limit()`
+
+```python
+from antflow import Pipeline, Stage
+from antflow.context import rate_limit
+
+async def poll_until_done(job_id: str):
+    while True:
+        async with rate_limit():       # acquires 1 of N slots
+            status = await openai.check(job_id)
+        if status == "done":           # slot already released
+            return job_id
+        await asyncio.sleep(10)        # sleeping does NOT hold a slot
+
+pipeline = Pipeline(stages=[
+    Stage("upload",  workers=2, tasks=[upload_file], queue_capacity=10),
+    Stage("submit",  workers=2, tasks=[submit_batch]),
+    Stage(
+        "poll",
+        workers=500,
+        tasks=[poll_until_done],
+        pull=True,
+        call_concurrency=5,   # only 5 poll API calls at once
+    ),
+])
+```
+
+### How it works
+
+1. You set `call_concurrency=N` on the Stage — AntFlow creates a shared semaphore of size N.
+2. Inside your task, wrap each API call with `async with rate_limit():`.
+3. At most N calls happen simultaneously across all workers in that stage.
+4. Workers that are sleeping or doing other work (submit, logging) do NOT hold a slot.
+
+### When to use what
+
+| Scenario | Use |
+|----------|-----|
+| Multi-task stage where one task must be throttled (e.g., validate → api_call → save) | `task_concurrency_limits` |
+| Long-running task with internal loop that makes periodic API calls | `call_concurrency` + `rate_limit()` |
+| Simple 1:1 "one task = one API call" | Either works; `task_concurrency_limits` is simpler |
+
+### Complete example: OpenAI Batch API
+
+```python
+import asyncio
+from antflow import Pipeline, Stage
+from antflow.context import rate_limit
+
+async def upload_file(file_path: str) -> str:
+    """Upload a JSONL file to OpenAI. Returns file_id."""
+    # ... real upload logic ...
+    return file_id
+
+async def submit_batch(file_id: str) -> str:
+    """Submit the file as a batch job. Returns batch_id."""
+    # ... real submit logic ...
+    return batch_id
+
+async def poll_until_done(batch_id: str) -> str:
+    """Poll until the batch job completes. Returns batch_id when done."""
+    while True:
+        async with rate_limit():
+            response = await openai_client.batches.retrieve(batch_id)
+        if response.status == "completed":
+            return batch_id
+        if response.status == "failed":
+            raise RuntimeError(f"Batch {batch_id} failed")
+        await asyncio.sleep(30)
+
+pipeline = Pipeline(stages=[
+    Stage(
+        name="upload",
+        workers=2,
+        tasks=[upload_file],
+        queue_capacity=10,       # keep 10 files pre-uploaded and ready
+    ),
+    Stage(
+        name="submit",
+        workers=2,
+        tasks=[submit_batch],
+    ),
+    Stage(
+        name="poll",
+        workers=500,             # 500 jobs being monitored simultaneously
+        tasks=[poll_until_done],
+        pull=True,               # submit only sends when poll worker is free
+        call_concurrency=5,      # max 5 concurrent poll API calls
+    ),
+])
+
+results = await pipeline.run(file_paths)
+```
+
+This gives you:
+- **2 workers** uploading files, with **10 pre-uploaded** files buffered
+- **2 workers** submitting batches (only when a poll worker requests)
+- **500 jobs** actively being monitored on OpenAI
+- **Only 5** poll API calls happening at any instant
+- Workers sleep between polls **without holding** a rate-limit slot
 
 ---
 

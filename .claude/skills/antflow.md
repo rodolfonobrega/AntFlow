@@ -159,7 +159,8 @@ Stage(
     task_wait_seconds=1.0,                  # delay between task retries
     stage_attempts=3,                       # (per_stage only) full stage retries
     unpack_args=False,                      # unpack dict items as **kwargs
-    task_concurrency_limits={"fn_name": 2}, # cap specific task concurrency
+    task_concurrency_limits={"fn_name": 2}, # cap specific task concurrency (wraps ENTIRE function)
+    call_concurrency=5,                     # cap concurrent rate_limit() blocks WITHIN tasks
     on_success=async_fn,                    # callback(item_id, result, metadata)
     on_failure=async_fn,                    # callback(item_id, error, metadata)
     on_skip=async_fn,                       # callback(item_id, value, metadata) — fired when skip_if matches
@@ -170,6 +171,62 @@ Stage(
 ```
 
 > **Constraint:** `pull=True` is incompatible with `retry="per_stage"`. First stage cannot be a pull stage.
+
+### Concurrency control: task_concurrency_limits vs call_concurrency
+
+**CRITICAL DISTINCTION — get this wrong and your pipeline breaks:**
+
+**`task_concurrency_limits`** — wraps the ENTIRE function. The semaphore is held from function entry to function return. Use only for **short, single-call tasks** in a **multi-task stage**.
+
+```python
+# CORRECT: upload is a fast gate, poll_loop is long (workers accumulate there)
+# WHY 50 workers? Because poll_loop runs for minutes — I want 50 jobs monitored.
+# WHY limit upload? API only allows 2 concurrent uploads.
+Stage("job", workers=50, tasks=[upload, poll_loop],
+      task_concurrency_limits={"upload": 2}, call_concurrency=5)
+
+# CORRECT: validate+save benefit from 50 workers; fetch_api has external rate limit
+Stage("Enrich", workers=50, tasks=[validate, fetch_api, save],
+      task_concurrency_limits={"fetch_api": 5})
+
+# BROKEN: single long-running task — just blocks all workers permanently
+Stage("Poll", workers=500, tasks=[poll_until_done],
+      task_concurrency_limits={"poll_until_done": 5})
+# → Only 5 workers ever run! Use call_concurrency instead.
+
+# POINTLESS: all tasks are short — just use workers=2
+Stage("job", workers=50, tasks=[upload, check],
+      task_concurrency_limits={"upload": 2})
+# → If no task needs the extra workers, reduce workers directly.
+```
+
+**Ask yourself:** why do I need more workers than the limit? If no other task in the
+stage benefits from the extra workers, just set `workers=N` and skip the limit entirely.
+
+**`call_concurrency`** — limits only the code inside `async with rate_limit():`. All workers stay alive; the slot is released immediately after the block. Use for **long-running tasks with internal loops** that make periodic API calls.
+
+```python
+from antflow.context import rate_limit
+
+async def poll_until_done(batch_id: str):
+    while True:
+        async with rate_limit():           # acquire slot briefly
+            status = await api.check(batch_id)
+        # slot released here — other workers can poll now
+        if status == "done":
+            return batch_id
+        await asyncio.sleep(30)            # NOT holding any slot
+
+# CORRECT: 500 jobs monitored, only 5 API calls at once
+Stage("Poll", workers=500, tasks=[poll_until_done],
+      pull=True, call_concurrency=5)
+```
+
+**When to use what:**
+- `task_concurrency_limits`: multi-task stage where one short task has an external rate limit, but another task needs many workers (e.g., upload gate + long poll)
+- `call_concurrency` + `rate_limit()`: task has an internal loop and you want to limit API calls without blocking the whole worker
+- Combine both: fast gate limited by `task_concurrency_limits` + loop limited by `call_concurrency`
+- Single task, simple limit: just set `workers=N` — don't overcomplicate it
 
 ---
 
@@ -336,7 +393,6 @@ pipeline = Pipeline(stages=[
 
 See `examples/pull_stage_openai_batch.py` for a full runnable version.
 
-`RendezvousChannel` is the underlying zero-buffer channel (exported from `antflow`); you rarely need it directly.
 
 ### Pipeline as context manager
 
@@ -386,7 +442,7 @@ sem = asyncio.Semaphore(5)  # max 5 concurrent
 async with AsyncExecutor(max_workers=20) as executor:
     results = await executor.map(lambda item: api_call(item, sem), items)
 
-# Or using task_concurrency_limits in pipeline
+# Or using task_concurrency_limits in pipeline (SHORT tasks only)
 Stage("API", workers=20, tasks=[api_call],
       task_concurrency_limits={"api_call": 5})
 ```
@@ -416,29 +472,49 @@ results = await (
 failed = [r for r in results if not r.is_success]
 ```
 
-### N itens processando, mas só K polling ao mesmo tempo
+### N jobs processando, mas só K API calls ao mesmo tempo
 
-`workers` é o teto de concorrência. Cada worker fica preso no seu próprio loop de polling — se um worker está no `await asyncio.sleep(10)`, ele não libera o slot para outro item. Logo: **workers = máximo de polls simultâneos**, independente do total de itens.
+Use `call_concurrency` + `rate_limit()` when you want many workers alive (each monitoring their job) but only a few API calls happening simultaneously:
 
 ```python
-# 1000 itens para a OpenAI, mas nunca mais de 20 polls ativos
+from antflow import Pipeline, Stage
+from antflow.context import rate_limit
+
 async def poll_openai_batch(batch_id: str) -> list:
     client = AsyncOpenAI()
     while True:
-        batch = await client.batches.retrieve(batch_id)
-        set_task_status(f"status={batch.status} ({batch.request_counts.completed} done)")
+        async with rate_limit():  # ← only 5 concurrent API calls
+            batch = await client.batches.retrieve(batch_id)
+        set_task_status(f"status={batch.status}")
         if batch.status == "completed":
             return await download_results(batch.output_file_id)
         if batch.status in ("failed", "expired", "cancelled"):
             raise RuntimeError(f"Batch {batch_id} {batch.status}")
-        await asyncio.sleep(10)
+        await asyncio.sleep(10)  # sleeping does NOT hold a rate-limit slot
 
+pipeline = Pipeline(stages=[
+    Stage("upload", workers=2, tasks=[upload_file], queue_capacity=10),
+    Stage(
+        "poll",
+        workers=500,             # 500 jobs monitored simultaneously
+        tasks=[poll_openai_batch],
+        pull=True,               # only start when a worker is free
+        call_concurrency=5,      # max 5 API calls at once
+    ),
+])
+results = await pipeline.run(file_paths)
+```
+
+**Simple alternative** (fewer jobs but simpler): just set workers=N to directly cap parallelism:
+
+```python
+# If you only need 20 jobs in-flight total:
 results = await Pipeline.quick(
-    batch_ids,           # 1000 itens
+    batch_ids,
     poll_openai_batch,
-    workers=20,          # ← nunca mais que 20 polls simultâneos
+    workers=20,          # each worker handles 1 job at a time
 )
-# Os outros 980 ficam na fila esperando um worker liberar
+# The other 980 items wait in the queue for a worker to free up
 ```
 
 ---
@@ -466,11 +542,11 @@ from antflow import (
     AsyncFuture,        # future returned by executor.submit()
     Pipeline,           # multi-stage pipeline
     PipelineBuilder,    # returned by Pipeline.create()
-    RendezvousChannel,  # zero-buffer pull channel (used internally by pull=True stages)
     Stage,              # single pipeline stage config
     StatusTracker,      # event-driven monitoring
     WaitStrategy,       # FIRST_COMPLETED | FIRST_EXCEPTION | ALL_COMPLETED
     set_task_status,    # update dashboard label from inside a task
+    rate_limit,         # async context manager for call_concurrency throttling
 
     # Result / stats dataclasses
     PipelineResult,     # .value, .error, .id, .is_success, .sequence_id, .metadata

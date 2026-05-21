@@ -31,7 +31,7 @@ if sys.version_info >= (3, 11):
 else:
     from taskgroup import TaskGroup
 
-from .context import worker_state_var
+from .context import _call_semaphore_var, worker_state_var
 from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
@@ -65,11 +65,11 @@ class RendezvousChannel:
     """
 
     def __init__(self) -> None:
-        # Each entry is a Future a downstream worker is waiting on.
         self._demand: asyncio.Queue = asyncio.Queue()
         self._unfinished_tasks: int = 0
         self._all_done: asyncio.Event = asyncio.Event()
         self._all_done.set()
+        self._closed: bool = False
 
     # ------------------------------------------------------------------
     # Downstream (pull-stage workers call these)
@@ -77,12 +77,16 @@ class RendezvousChannel:
 
     async def get(self) -> Any:
         """Signal readiness and wait to receive the next item."""
+        if self._closed:
+            return _PULL_CLOSED
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._demand.put_nowait(fut)
         try:
             return await asyncio.shield(fut)
-        except (asyncio.CancelledError, Exception):
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                return fut.result()
             if not fut.done():
                 fut.cancel()
             raise
@@ -104,9 +108,13 @@ class RendezvousChannel:
     async def put(self, item: Any) -> None:
         """Wait for a ready downstream worker, then deliver item directly."""
         while True:
-            fut = await self._demand.get()
+            if self._closed:
+                return
+            try:
+                fut = await asyncio.wait_for(self._demand.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
             if fut.done():
-                # Worker timed out and cancelled its future — skip, try next.
                 continue
             self._unfinished_tasks += 1
             self._all_done.clear()
@@ -128,6 +136,7 @@ class RendezvousChannel:
 
     def close(self) -> None:
         """Wake all workers that are waiting on demand, signalling shutdown."""
+        self._closed = True
         while not self._demand.empty():
             try:
                 fut = self._demand.get_nowait()
@@ -158,6 +167,7 @@ class Stage:
     skip_if: Optional[Callable[[Any], bool]] = None
     queue_capacity: Optional[int] = None
     pull: bool = False
+    call_concurrency: Optional[int] = None
 
     def validate(self) -> None:
         """
@@ -462,6 +472,7 @@ class Pipeline:
         self._worker_states: Dict[str, WorkerState] = {}
         self._worker_metrics: Dict[str, WorkerMetrics] = {}
         self._task_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
+        self._call_semaphores: Dict[str, asyncio.Semaphore] = {}
         self._initialize_worker_tracking()
         self._initialize_semaphores()
 
@@ -563,12 +574,14 @@ class Pipeline:
                 )
 
     def _initialize_semaphores(self) -> None:
-        """Initialize semaphores for task concurrency limits."""
+        """Initialize semaphores for task and call concurrency limits."""
         for stage in self.stages:
             if stage.task_concurrency_limits:
                 self._task_semaphores[stage.name] = {}
                 for task_name, limit in stage.task_concurrency_limits.items():
                     self._task_semaphores[stage.name][task_name] = asyncio.Semaphore(limit)
+            if stage.call_concurrency is not None:
+                self._call_semaphores[stage.name] = asyncio.Semaphore(stage.call_concurrency)
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
         """
@@ -1268,8 +1281,10 @@ class Pipeline:
             self._worker_states[name].current_item_id = item_id
             self._worker_states[name].processing_since = start_time
 
-            # Set context variable for task status updates
+            # Set context variables for task status updates and call_concurrency
             token = worker_state_var.set(self._worker_states[name])
+            call_sem = self._call_semaphores.get(stage.name)
+            call_sem_token = _call_semaphore_var.set(call_sem)
 
             try:
                 logger.debug(
@@ -1397,6 +1412,7 @@ class Pipeline:
                     except Exception as e:
                         logger.error(f"[{name}] Error in on_failure callback: {e}")
             finally:
+                _call_semaphore_var.reset(call_sem_token)
                 worker_state_var.reset(token)
                 self._worker_states[name].status = "idle"
                 self._worker_states[name].current_item_id = None

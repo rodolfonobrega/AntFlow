@@ -1,5 +1,6 @@
 """
-OpenAI Batch Pipeline using pull=True for demand-driven job submission.
+OpenAI Batch Pipeline using pull=True + call_concurrency for demand-driven
+job submission with rate-limited polling.
 
 Problem
 -------
@@ -9,25 +10,26 @@ OpenAI* — they just have no observer yet.  A job can finish while waiting in
 the queue, so the slot it occupies on OpenAI is wasted until a polling worker
 finally picks it up.
 
-Solution — pull=True on the poll stage
----------------------------------------
-With pull=True the poll stage workers signal readiness *before* a job is
-submitted.  Upstream (submit) only produces when downstream (poll) has a free
-worker.  This means:
-
-  * A job is submitted exactly when a poll worker is ready to watch it.
-  * No job ever sits unobserved in a buffer.
-  * ``workers=N`` on the pull stage is a hard cap on jobs in-flight.
+Solution — pull=True + call_concurrency
+----------------------------------------
+With pull=True the submit+poll stage workers signal readiness *before* a job
+is submitted.  Upstream (upload) only delivers when downstream has a free
+worker.  ``call_concurrency`` limits concurrent poll API calls without blocking
+the entire task — so many jobs can be monitored simultaneously with few API
+calls at a time.
 
 Pipeline shape
 --------------
-  upload (push, 2 workers)
-    → submit_and_poll (pull=True, 5 workers)   ← key stage
+  upload (push, 2 workers, queue_capacity=10 pre-uploaded files)
+    → submit_and_poll (pull=True, 500 workers, call_concurrency=5)
       → download (push, 3 workers)
 
-The submit_and_poll task submits the job *and* polls it to completion in one
-call.  The pull stage ensures that task only starts when a worker is free,
-so at most 5 jobs are ever running on OpenAI at once.
+Guarantees:
+  * A job is submitted exactly when a poll worker is ready to watch it.
+  * No job ever sits unobserved in a buffer.
+  * ``workers=N`` on the pull stage is a hard cap on jobs in-flight.
+  * Only ``call_concurrency`` poll API calls happen simultaneously.
+  * Workers sleep between polls without holding any rate-limit slot.
 
 Customising / testing
 ---------------------
@@ -45,6 +47,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from antflow import Pipeline, Stage
+from antflow.context import rate_limit
 
 
 # ---------------------------------------------------------------------------
@@ -107,25 +110,29 @@ async def _sim_download(result_ref: Any) -> Any:
 
 class BatchPipeline:
     """
-    Batch pipeline with pull=True on the submit+poll stage.
+    Batch pipeline with pull=True + call_concurrency on the submit+poll stage.
 
     Args:
-        upload_workers:  concurrent upload workers (default 2).
-        poll_workers:    concurrent poll workers = hard cap on jobs in-flight
-                         on OpenAI at any time (default 5).
-        download_workers: concurrent download workers (default 3).
-        poll_interval:   seconds between poll attempts (default 0.5).
-        upload_fn:       replaces the simulated upload call.
-        submit_fn:       replaces the simulated submit call.
-        poll_fn:         replaces the simulated poll call.
-        download_fn:     replaces the simulated download call.
+        upload_workers:    concurrent upload workers (default 2).
+        upload_prefetch:   pre-uploaded files buffer (default 10).
+        poll_workers:      concurrent poll workers = hard cap on jobs in-flight
+                           on OpenAI at any time (default 5).
+        poll_concurrency:  max concurrent poll API calls (default 5).
+        download_workers:  concurrent download workers (default 3).
+        poll_interval:     seconds between poll attempts (default 0.5).
+        upload_fn:         replaces the simulated upload call.
+        submit_fn:         replaces the simulated submit call.
+        poll_fn:           replaces the simulated poll call.
+        download_fn:       replaces the simulated download call.
     """
 
     def __init__(
         self,
         *,
         upload_workers: int = 2,
+        upload_prefetch: int = 10,
         poll_workers: int = 5,
+        poll_concurrency: int = 5,
         download_workers: int = 3,
         poll_interval: float = 0.5,
         upload_fn:   UploadFn   | None = None,
@@ -144,15 +151,14 @@ class BatchPipeline:
                 name="upload",
                 workers=upload_workers,
                 tasks=[self._upload],
+                queue_capacity=upload_prefetch,
             ),
-            # pull=True: this worker only receives an uploaded file when it is
-            # free to submit AND poll the resulting job immediately.
-            # At most `poll_workers` jobs are ever in-flight on OpenAI.
             Stage(
                 name="submit_and_poll",
                 workers=poll_workers,
                 tasks=[self._submit_and_poll],
                 pull=True,
+                call_concurrency=poll_concurrency,
             ),
             Stage(
                 name="download",
@@ -176,6 +182,10 @@ class BatchPipeline:
         Because this stage uses pull=True, this function is only called
         when a worker is available — so no job is ever submitted without
         an observer.
+
+        rate_limit() acquires one of the call_concurrency slots so only N
+        poll API calls happen at once.  The slot is released immediately
+        after the call — sleeping between polls does NOT hold a slot.
         """
         file_id = uploaded["file_id"]
         openai_file_id = uploaded["openai_file_id"]
@@ -183,12 +193,11 @@ class BatchPipeline:
         batch_id = await self._submit_fn(openai_file_id)
         print(f"[submit]  {file_id} -> {batch_id}")
 
-        # Poll until done.  The worker is dedicated to this single job,
-        # so completions are noticed immediately.
         attempts = 0
         while True:
             attempts += 1
-            status, result_ref = await self._poll_fn(batch_id)
+            async with rate_limit():
+                status, result_ref = await self._poll_fn(batch_id)
             if status == "complete":
                 print(f"[poll]    {batch_id} done after {attempts} poll(s)")
                 return BatchResult(file_id=file_id, result_ref=result_ref)
@@ -218,7 +227,9 @@ async def main() -> None:
 
     pipeline = BatchPipeline(
         upload_workers=2,
-        poll_workers=5,       # hard cap: at most 5 jobs on OpenAI at once
+        upload_prefetch=10,
+        poll_workers=5,
+        poll_concurrency=5,
         download_workers=3,
         poll_interval=0.2,
     )
