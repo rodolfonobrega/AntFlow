@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-21
+
+### Added
+
+*   **Pull Stages (`pull=True`):** New demand-driven mode for `Stage`. When `pull=True`, downstream workers signal readiness before an item is delivered — there is no buffer between stages. Items are handed off directly via `RendezvousChannel`, a zero-buffer rendezvous channel. This guarantees that no item is ever in-flight between stages without an active worker watching it.
+    *   Use case: polling-heavy pipelines (e.g. OpenAI Batch API) where submitted jobs must never sit unmonitored in a queue.
+    *   `workers=N` becomes a hard cap on items in-flight, with no `queue_capacity` tuning required.
+    *   Incompatible with `retry="per_stage"`. Cannot be used on the first stage.
+*   **`RendezvousChannel`:** The zero-buffer pull channel is now exported from `antflow` for advanced use cases.
+*   **`PullBatchPipeline` example:** `examples/openai_batch_prefetch.py` now contains two side-by-side implementations — the original sweeper-based `OpenAIBatchPipeline` and the new `PullBatchPipeline` — with a detailed docstring comparing when to use each.
+*   **`examples/pull_stage_openai_batch.py`:** Standalone example demonstrating `pull=True` with an upload-prefetch buffer and a combined submit+poll stage.
+*   **Auto fast event loop:** The pipeline now automatically selects the fastest available event loop policy on supported platforms.
+
+### Fixed
+
+*   **`on_failure` not called in `per_stage` mode** — callback was silently skipped when `retry="per_stage"`.
+*   **`on_success` fired for skipped items** — callback was incorrectly invoked even when `skip_if` returned `True`.
+*   **`on_skip` not fired for skipped items** — callback was never invoked.
+*   **`shutdown()` silently discarded items** — now logs a `WARNING` with the count of discarded items.
+*   **Deadlock in `per_stage` retry when `workers == queue_capacity`** — all workers could block simultaneously trying to re-queue retries into a full input queue. Retries now go through a dedicated unbounded overflow queue.
+*   **`task_concurrency_limits` accepted unknown task names** — now raises `StageValidationError` at construction time instead of silently ignoring the limit.
+*   **Task-level events not emitted in `per_stage` mode** — `on_task_start` / `on_task_complete` callbacks on `StatusTracker` were not fired.
+*   **`stream()` ignored `buffer_size`** — the result queue was always unbounded regardless of the parameter.
+
+### Changed
+
+*   **Documentation:** `docs/user-guide/pipeline.md` expanded with Option C (pull=True) in the OpenAI Batch API use case section, including a comparison table between the sweeper, single-stage, and pull approaches.
+*   **Test naming:** Regression tests renamed from `test_pipeline_bugs.py` to `test_pipeline_regressions.py` with behavior-based test function names.
+
+## [0.7.3] - 2026-05-07
+
+### Changed
+
+*   **Release automation:** Added `scripts/release.sh` for consistent versioned releases.
+*   **CI:** Strengthened release validation checks.
+
 ## [0.7.2] - 2026-01-15
 
 ### Added
