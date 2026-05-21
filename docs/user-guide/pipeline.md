@@ -176,24 +176,69 @@ stage_poll = Stage("Polling", workers=50, tasks=[poll], queue_capacity=1)
 
 ### Option B: The "Correct" Way (Single Stage + Task Limits) 🏆
 
-This is the recommended approach for professional production pipelines where limits are non-negotiable.
+This is the recommended approach when both the upload and poll tasks can live in the same worker.
 
 ```python
-# 🏆 BEST PRACTICE: 100% Precision
+# 🏆 Precise: upload throttled to 2 concurrent, 50 jobs in-flight total
 stage = Stage(
-    "Combined", 
-    workers=50, 
+    "Combined",
+    workers=50,
     tasks=[upload, poll],
     task_concurrency_limits={"upload": 2}
 )
 ```
 
-**Why this is superior:**
-*   **No Buffers:** There is no internal queue between the `upload` and the `poll`. They happen sequentially inside the same worker.
-*   **Total Control:** A worker only fetches a new item from the source when it is 100% free. If you have 50 workers, you have **exactly 50 jobs** in flight. No more, no less.
-*   **Zero Gap:** As soon as a file is uploaded, that specific worker immediately starts monitoring it. No job ever sits "unattended" in a queue.
+**Why this is superior to Option A:**
+*   **No Buffers:** There is no internal queue between `upload` and `poll`. They happen sequentially inside the same worker.
+*   **Total Control:** A worker only fetches a new item when it is 100% free. If you have 50 workers, you have **exactly 50 jobs** in flight.
+*   **Zero Gap:** As soon as a file is uploaded, that same worker immediately starts monitoring it. No job ever sits unattended.
 
-**Verdict:** ✅ **Winner.** This is the most robust way to ensure 100% compliance with external API constraints.
+**Verdict:** ✅ **Best when upload and poll belong together in one worker.**
+
+---
+
+### Option C: Two Stages + `pull=True` (Upload Prefetch + Exact Control) 🚀
+
+Option B is great, but it has one trade-off: the worker only starts uploading the *next* file after the current job finishes polling — which can take minutes. Upload workers sit idle the whole time.
+
+`pull=True` lets you separate the stages while keeping exact control:
+
+*   **Upload stage** keeps a buffer of pre-uploaded files (controlled by `queue_capacity`), so upload workers are always busy preparing the next job.
+*   **Poll stage** uses `pull=True` — a poll worker only receives an uploaded file when it is free to submit and monitor it immediately. There is **no queue** between the two stages; items are handed off directly to a ready worker.
+
+```python
+pipeline = Pipeline(stages=[
+    Stage(
+        name="Upload",
+        workers=2,
+        tasks=[upload_file],
+        queue_capacity=10,   # pre-upload up to 10 files ahead
+    ),
+    Stage(
+        name="Submit_and_Poll",
+        workers=50,
+        tasks=[submit_batch, poll_until_done],
+        pull=True,           # only receives a file when a worker is free
+    ),
+])
+```
+
+**How it works:**
+
+1. The 2 upload workers run ahead and fill a buffer of up to 10 pre-uploaded files.
+2. When a poll worker finishes its current job, it signals readiness — the upload stage delivers the next pre-uploaded file directly to that worker.
+3. The worker immediately submits and starts polling. No uploaded file ever sits unmonitored.
+
+**Verdict:** ✅ **Best when uploads are slow and you want to keep upload workers busy between polling cycles.**
+
+| | Option A | Option B | Option C |
+|---|---|---|---|
+| Separate upload / poll stages | ✅ | ❌ | ✅ |
+| Upload prefetch buffer | ✅ | ❌ | ✅ |
+| Zero unmonitored jobs | ❌ | ✅ | ✅ |
+| Exact in-flight cap | ❌ | ✅ | ✅ |
+
+See also: [`examples/pull_stage_openai_batch.py`](https://github.com/rodolfonobrega/antflow/blob/main/examples/pull_stage_openai_batch.py)
 
 ---
 

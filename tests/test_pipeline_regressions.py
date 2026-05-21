@@ -1,4 +1,4 @@
-"""Regression tests for the 8 pipeline bugs fixed in this batch."""
+"""Regression tests for pipeline edge cases."""
 
 import asyncio
 import logging
@@ -10,7 +10,7 @@ from antflow.exceptions import StageValidationError
 
 
 # ---------------------------------------------------------------------------
-# Bug 1 — on_failure not called in per_stage mode
+# on_failure called in per_stage mode
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +39,7 @@ async def test_on_failure_called_in_per_stage():
 
 
 # ---------------------------------------------------------------------------
-# Bug 2a — on_success must NOT fire for skipped items
+# on_success not fired for skipped items
 # ---------------------------------------------------------------------------
 
 
@@ -64,7 +64,7 @@ async def test_on_success_not_called_for_skipped_items():
 
 
 # ---------------------------------------------------------------------------
-# Bug 2b — on_skip IS called for skipped items
+# on_skip fired for skipped items
 # ---------------------------------------------------------------------------
 
 
@@ -88,7 +88,7 @@ async def test_on_skip_called_for_skipped_items():
 
 
 # ---------------------------------------------------------------------------
-# Bug 3 — shutdown logs a warning when items are discarded
+# shutdown warns when items are discarded
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +112,7 @@ async def test_shutdown_warns_on_discarded_items(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Bug 4 — no deadlock in per_stage retry when workers == queue_capacity
+# per_stage retry does not deadlock when workers == queue_capacity
 # ---------------------------------------------------------------------------
 
 
@@ -144,7 +144,7 @@ async def test_per_stage_retry_no_deadlock():
 
 
 # ---------------------------------------------------------------------------
-# Bug 5 — task_concurrency_limits rejects unknown task names
+# task_concurrency_limits rejects unknown task names
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def test_task_concurrency_limits_unknown_name_raises():
 
 
 # ---------------------------------------------------------------------------
-# Bug 6 — task-level events emitted in per_stage mode
+# task-level events emitted in per_stage mode
 # ---------------------------------------------------------------------------
 
 
@@ -192,7 +192,7 @@ async def test_task_events_emitted_in_per_stage():
 
 
 # ---------------------------------------------------------------------------
-# Bug 7 — stream() respects buffer_size
+# stream() respects buffer_size
 # ---------------------------------------------------------------------------
 
 

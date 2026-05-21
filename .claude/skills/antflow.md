@@ -290,7 +290,7 @@ stage = Stage("Transform", workers=5, tasks=[transform],
 
 ### Pull Stages — demand-driven / just-in-time processing
 
-By default, each stage pushes items into the next stage's queue as fast as it can. With `pull=True`, a stage only receives an item when one of its workers is actually ready — the upstream is blocked until demand arrives. This caps the work-in-progress naturally without tuning `queue_capacity`.
+By default, each stage pushes items into the next stage's queue as fast as it can. With `pull=True`, a stage only receives an item when one of its workers is actually ready — the upstream is blocked until demand arrives. There is no buffer between the two stages; items are handed off directly to a ready worker.
 
 ```python
 pipeline = Pipeline(stages=[
@@ -308,6 +308,33 @@ results = await pipeline.run(urls)
 - Downstream is expensive/rate-limited and you don't want upstream to buffer aggressively
 - You want `workers` to be the hard cap on concurrency between two stages
 - Replacing manual `queue_capacity` tuning with automatic pacing
+
+**OpenAI Batch API example — upload prefetch + exact poll control:**
+
+A common pattern: upload workers keep a buffer of pre-uploaded files ready, but poll workers only receive a file when they are free to submit and monitor it immediately — no unobserved jobs.
+
+```python
+pipeline = Pipeline(stages=[
+    Stage(
+        name="Upload",
+        workers=2,
+        tasks=[upload_file],
+        queue_capacity=10,   # pre-upload up to 10 files ahead
+    ),
+    Stage(
+        name="Submit_and_Poll",
+        workers=50,
+        tasks=[submit_batch, poll_until_done],
+        pull=True,           # only receives a file when a worker is free to watch it
+    ),
+])
+```
+
+- Upload workers run ahead and fill the buffer — they are never idle waiting for a poll slot.
+- When a poll worker finishes, it pulls the next pre-uploaded file directly and submits immediately.
+- At most `50` jobs are ever in-flight on OpenAI; none sit unmonitored in a queue.
+
+See `examples/pull_stage_openai_batch.py` for a full runnable version.
 
 `RendezvousChannel` is the underlying zero-buffer channel (exported from `antflow`); you rarely need it directly.
 

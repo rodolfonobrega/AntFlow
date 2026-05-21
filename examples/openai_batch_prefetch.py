@@ -1,44 +1,67 @@
 """
-OpenAI Batch Pipeline with prefetch buffer and sweep-based polling.
+OpenAI Batch Pipeline — two implementations for comparison.
 
+This module contains two classes that solve the same problem differently:
+
+OpenAIBatchPipeline  — sweeper-based (lower worker count, bulk-poll friendly)
+PullBatchPipeline    — pull=True based (simpler code, same correctness guarantees)
+
+Both guarantee that no submitted job is ever left unmonitored.
+
+--------------------------------------------------------------------
+OpenAIBatchPipeline (sweeper)
+--------------------------------------------------------------------
 Constraints
------------
 - Upload:   max N concurrent workers; keeps up to ``upload_prefetch`` files
-            pre-uploaded in a bounded buffer so the submit stage never idles
-            while waiting for an upload to finish.
+            pre-uploaded in a bounded buffer so the submit stage never idles.
 - Submit:   at most ``max_in_flight`` batch jobs outstanding at any time.
-            The semaphore is *acquired before* submit and *released the moment
-            the sweeper confirms completion* — not after download.
+            The semaphore is acquired before submit and released the moment
+            the sweeper confirms completion — not after download.
 - Polling:  a background sweeper watches **all** in-flight jobs every round,
             running at most ``poll_parallelism`` polls concurrently.
 - Download: triggered immediately after the sweeper releases a slot, so slow
             downloads never block new submissions.
 
 Why a sweeper instead of a poll queue
---------------------------------------
-Items in the poll queue are already running on OpenAI — they just lack an
-observer.  A normal queue holds slots until a worker picks them up, so a
-completed job keeps its in-flight slot until it reaches the front of the
-queue.  The sweeper solves this by scanning *all* in-flight jobs every round:
-as soon as a job finishes, its slot is released immediately regardless of
-position.
+A normal queue holds slots until a worker picks them up, so a completed job
+keeps its in-flight slot until it reaches the front of the queue.  The sweeper
+solves this by scanning *all* in-flight jobs every round: as soon as a job
+finishes, its slot is released immediately regardless of position.
 
-Customising / testing
----------------------
+When to prefer the sweeper:
+- The API supports bulk polling (one call to check N jobs at once) — the
+  sweeper can gather all in-flight IDs and send a single batched request.
+- You want fewer OS-level tasks: one sweeper loop serves all in-flight jobs,
+  vs. one asyncio task per job with pull=True.
+
+--------------------------------------------------------------------
+PullBatchPipeline (pull=True)
+--------------------------------------------------------------------
+Uses pull=True on the submit+poll stage so a job is only submitted when a
+worker is free to monitor it immediately.  A shared semaphore caps concurrent
+poll API calls the same way the sweeper does.
+
+When to prefer pull=True:
+- Simpler code — no sweeper task, no extra semaphore/lock/download queue.
+- Each worker owns exactly one job from submit to completion; no shared state.
+- Bulk polling is not needed or not supported by the API.
+
+--------------------------------------------------------------------
+Customising / testing (both classes)
+--------------------------------------------------------------------
 Pass async callables to ``upload_fn``, ``submit_fn``, ``poll_fn`` and
-``download_fn`` to replace the default simulated OpenAI calls.  This is
-the recommended way to write unit tests without hitting the real API::
+``download_fn`` to replace the default simulated OpenAI calls::
 
-    pipeline = OpenAIBatchPipeline(
-        poll_fn=my_mock_poll,
-        download_fn=my_mock_download,
-    )
+    pipeline = OpenAIBatchPipeline(poll_fn=my_mock_poll)
+    pipeline = PullBatchPipeline(poll_fn=my_mock_poll)
 """
 
 import asyncio
 import random
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
+
+from antflow import Pipeline, Stage
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +286,109 @@ class OpenAIBatchPipeline:
 
 
 # ---------------------------------------------------------------------------
+# PullBatchPipeline — same guarantees, simpler implementation
+# ---------------------------------------------------------------------------
+
+
+class PullBatchPipeline:
+    """
+    Upload-prefetch + pull=True pipeline.
+
+    A job is only submitted when a worker is free to monitor it immediately,
+    so no job is ever left unobserved.  A shared semaphore limits concurrent
+    poll API calls the same way the sweeper does in OpenAIBatchPipeline.
+
+    Args:
+        upload_workers:   concurrent upload workers (default 2).
+        upload_prefetch:  pre-uploaded files kept ready in the buffer (default 10).
+        max_in_flight:    hard cap on jobs submitted to OpenAI at once (default 50).
+        poll_parallelism: max concurrent poll API calls across all workers (default 5).
+        poll_interval:    seconds between poll attempts per worker (default 1.0).
+        upload_fn / submit_fn / poll_fn / download_fn: injectable callables for testing.
+    """
+
+    def __init__(
+        self,
+        *,
+        upload_workers: int = 2,
+        upload_prefetch: int = 10,
+        max_in_flight: int = 50,
+        poll_parallelism: int = 5,
+        poll_interval: float = 1.0,
+        upload_fn: UploadFn | None = None,
+        submit_fn: SubmitFn | None = None,
+        poll_fn: PollFn | None = None,
+        download_fn: DownloadFn | None = None,
+    ) -> None:
+        self._poll_interval = poll_interval
+        self._upload_fn = upload_fn or openai_upload
+        self._submit_fn = submit_fn or openai_submit_batch
+        self._poll_fn = poll_fn or openai_poll_batch
+        self._download_fn = download_fn or openai_download
+
+        # Caps concurrent poll API calls shared across all workers.
+        self._poll_sem = asyncio.Semaphore(poll_parallelism)
+
+        self._pipeline = Pipeline(stages=[
+            Stage(
+                name="upload",
+                workers=upload_workers,
+                tasks=[self._upload],
+                queue_capacity=upload_prefetch,  # pre-upload buffer
+            ),
+            # pull=True: a file is only handed to this worker when it is free.
+            # The worker submits and polls until done — no job sits unmonitored.
+            # max_in_flight workers == hard cap on jobs in-flight on OpenAI.
+            Stage(
+                name="submit_and_poll",
+                workers=max_in_flight,
+                tasks=[self._submit_and_poll],
+                pull=True,
+            ),
+            Stage(
+                name="download",
+                workers=upload_workers,
+                tasks=[self._download],
+            ),
+        ])
+
+    async def _upload(self, task: FileTask) -> UploadedFile:
+        openai_id = await self._upload_fn(task.file_id)
+        uploaded = UploadedFile(file_id=task.file_id, openai_file_id=openai_id)
+        print(f"[upload]  {task.file_id} -> {openai_id}")
+        return uploaded
+
+    async def _submit_and_poll(self, uploaded: UploadedFile) -> tuple[BatchJob, Any]:
+        batch_id = await self._submit_fn(uploaded.openai_file_id)
+        job = BatchJob(
+            job_id=f"job_{uploaded.file_id}",
+            openai_batch_id=batch_id,
+            file=uploaded,
+        )
+        print(f"[submit]  {uploaded.file_id} -> {batch_id}")
+
+        attempts = 0
+        while True:
+            attempts += 1
+            async with self._poll_sem:
+                status, result_ref = await self._poll_fn(job.openai_batch_id)
+            if status == "complete":
+                print(f"[poll]    {job.job_id} done after {attempts} attempt(s)")
+                return job, result_ref
+            await asyncio.sleep(self._poll_interval)
+
+    async def _download(self, payload: tuple[BatchJob, Any]) -> Any:
+        job, result_ref = payload
+        result = await self._download_fn(result_ref)
+        print(f"[download] {job.job_id} -> {result}")
+        return result
+
+    async def run(self, files: list[FileTask]) -> list[Any]:
+        results = await self._pipeline.run(files)
+        return [r.value for r in results]
+
+
+# ---------------------------------------------------------------------------
 # Demo
 # ---------------------------------------------------------------------------
 
@@ -270,16 +396,27 @@ class OpenAIBatchPipeline:
 async def main() -> None:
     files = [FileTask(file_id=f"file_{i:03d}", data=f"payload_{i}") for i in range(20)]
 
-    pipeline = OpenAIBatchPipeline(
+    print("=== OpenAIBatchPipeline (sweeper) ===")
+    sweeper_pipeline = OpenAIBatchPipeline(
         upload_workers=2,
         upload_prefetch=10,
         max_in_flight=50,
         poll_parallelism=5,
         poll_interval=0.5,
     )
+    results = await sweeper_pipeline.run(files)
+    print(f"Finished — {len(results)} results\n")
 
-    results = await pipeline.run(files)
-    print(f"\nFinished — {len(results)} results collected")
+    print("=== PullBatchPipeline (pull=True) ===")
+    pull_pipeline = PullBatchPipeline(
+        upload_workers=2,
+        upload_prefetch=10,
+        max_in_flight=50,
+        poll_parallelism=5,
+        poll_interval=0.5,
+    )
+    results = await pull_pipeline.run(files)
+    print(f"Finished — {len(results)} results")
 
 
 if __name__ == "__main__":
