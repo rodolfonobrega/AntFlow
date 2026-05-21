@@ -14,6 +14,8 @@ dependencies = [
     "tenacity>=8.0.0",
     "rich>=13.0.0",
     "taskgroup>=0.0.0a4; python_version < '3.11'",
+    "uvloop>=0.21.0; sys_platform != 'win32'",
+    "winloop>=0.6.0; sys_platform == 'win32'",
 ]
 keywords = ["AntFlow", "async", "asyncio", "pipeline", "concurrent", "futures", "executor", "worker-pool"]
 classifiers = [

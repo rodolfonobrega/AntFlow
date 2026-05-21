@@ -3,6 +3,20 @@ AntFlow: Async execution library with concurrent.futures-style API and advanced 
 """
 
 from ._version import __version__
+
+# Auto-activate the fastest available event loop for this platform.
+# uvloop on Linux/macOS, winloop on Windows — transparent to the user.
+import sys as _sys
+try:
+    if _sys.platform in ("win32", "cygwin", "cli"):
+        import winloop as _fast_loop
+    else:
+        import uvloop as _fast_loop
+    _fast_loop.install()
+    del _fast_loop
+except ImportError:
+    pass
+del _sys
 from .context import set_task_status
 from .exceptions import (
     AntFlowError,
@@ -12,7 +26,7 @@ from .exceptions import (
     TaskFailedError,
 )
 from .executor import AsyncExecutor, AsyncFuture, WaitStrategy
-from .pipeline import Pipeline, PipelineBuilder, Stage
+from .pipeline import Pipeline, PipelineBuilder, RendezvousChannel, Stage
 from .tracker import StatusEvent, StatusTracker
 from .types import (
     DashboardProtocol,
@@ -43,6 +57,7 @@ __all__ = [
     "PipelineResult",
     "Pipeline",
     "PipelineBuilder",
+    "RendezvousChannel",
     "PipelineError",
     "PipelineStats",
     "Stage",

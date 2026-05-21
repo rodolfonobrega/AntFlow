@@ -92,10 +92,12 @@ The `Stage` class is the building block of your pipeline. Here are all the avail
 | **`task_wait_seconds`** | `float` | `1.0` | Time to wait between retries. |
 | **`task_concurrency_limits`** | `Dict[str, int]` | `None` | Max concurrent executions for specific task functions (see example below). |
 | **`unpack_args`** | `bool` | `False` | If `True`, unpacks the input item (`*args`/`**kwargs`) when calling the first task. |
-| **`on_success`** | `Callable` | `None` | Callback or `async` function to run on successful item completion. |
-| **`on_failure`** | `Callable` | `None` | Callback or `async` function to run on item failure (after all retries). |
+| **`on_success`** | `Callable` | `None` | Callback or `async` function to run on successful item completion. Signature: `(item_id, result, metadata)`. Not called for skipped items. |
+| **`on_failure`** | `Callable` | `None` | Callback or `async` function to run on item failure (after all retries). Signature: `(item_id, error, metadata)`. Works in both `per_task` and `per_stage` modes. |
+| **`on_skip`** | `Callable` | `None` | Callback or `async` function called when an item is skipped via `skip_if`. Signature: `(item_id, value, metadata)`. |
 | **`skip_if`** | `Callable` | `None` | Predicate function `(item) -> bool`. If `True`, the item skips this stage entirely. |
 | **`queue_capacity`** | `int` | `None` | Optional. Manually set input queue size. If `None` (default), uses smart limit (`workers * 10`). Set to `0` for infinite. |
+| **`pull`** | `bool` | `False` | Demand-driven mode. Workers pull items from upstream only when ready — upstream is blocked until a worker requests the next item. See [Pull Stages](#pull-stages). Incompatible with `retry="per_stage"`. Cannot be used on the first stage. |
 
 ### Use Case: OpenAI Batch Processing
 
@@ -236,6 +238,41 @@ stage = Stage(
     tasks=[process]
 )
 ```
+
+## Pull Stages
+
+By default each stage pushes finished items into the next stage's queue as fast as it can. A **pull stage** (`pull=True`) inverts this: downstream workers signal readiness first, and upstream only delivers one item per ready worker. There is no buffer between the two stages — items are handed off directly.
+
+### When to use
+
+| Situation | Recommendation |
+|---|---|
+| Downstream is expensive/rate-limited and you want exact control over concurrency | `pull=True` |
+| You want `workers` to be a hard cap (not approximate) on items in-flight between stages | `pull=True` |
+| Replacing fiddly `queue_capacity` tuning | `pull=True` |
+| Normal balanced pipelines | Default (push) |
+
+### Example
+
+```python
+from antflow import Pipeline, Stage
+
+pipeline = Pipeline(stages=[
+    Stage("Fetch",   workers=10, tasks=[fetch_url]),
+    Stage("Embed",   workers=4,  tasks=[call_embedding_api], pull=True),
+    #                                                         ^^^^^^^^^
+    # Upstream only produces when an Embed worker is free.
+    # Never more than 4 items in-flight here, regardless of Fetch speed.
+])
+results = await pipeline.run(urls)
+```
+
+### Constraints
+
+- Cannot be used on the **first** stage (raises `PipelineError`).
+- Incompatible with `retry="per_stage"` (raises `StageValidationError`).
+
+---
 
 ## Basic Usage
 
@@ -890,6 +927,18 @@ async for result in pipeline.stream(range(100)):
 ```
 
 Unlike `run()`, which returns a complete list, `stream()` is more memory-efficient for very large datasets.
+
+#### Backpressure with `buffer_size`
+
+By default the internal result queue is unbounded — the pipeline produces results as fast as it can regardless of consumer speed. Pass `buffer_size` to cap the queue: the pipeline will block (applying backpressure) once the buffer is full.
+
+```python
+# Pipeline pauses whenever the consumer falls more than 10 results behind
+async for result in pipeline.stream(large_dataset, buffer_size=10):
+    await slow_consumer(result)
+```
+
+Use this when your consumer is significantly slower than the pipeline and you want to avoid unbounded memory growth.
 
 ### Dict Input
 
