@@ -26,6 +26,15 @@ import antflow
 print(antflow.__version__)
 ```
 
+## Fast Event Loop (Automatic)
+
+AntFlow automatically installs the fastest available event loop on import:
+
+- **Linux / macOS** → [uvloop](https://github.com/MagicStack/uvloop) (included as a dependency)
+- **Windows** → [winloop](https://github.com/vizonex/winloop) (included as a dependency)
+
+No configuration needed. Just `import antflow` and the fast loop is active. If for some reason neither package is importable, AntFlow falls back to the standard asyncio loop without error.
+
 ## Optional Dependencies
 
 ### Development Tools

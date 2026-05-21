@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import sys
 import time
 from collections import deque
@@ -30,7 +31,7 @@ if sys.version_info >= (3, 11):
 else:
     from taskgroup import TaskGroup
 
-from .context import worker_state_var
+from .context import _call_semaphore_var, worker_state_var
 from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
@@ -47,6 +48,102 @@ from .types import (
 from .utils import extract_exception, setup_logger
 
 logger = setup_logger(__name__)
+
+_PULL_CLOSED = object()  # sentinel that tells a pull worker to stop
+
+
+class RendezvousChannel:
+    """
+    Pull-based inter-stage channel — zero buffer.
+
+    Downstream workers signal readiness by calling get(); upstream workers
+    deliver by calling put().  put() blocks until a worker is actually waiting,
+    so no item ever sits unobserved between stages.
+
+    The interface mirrors asyncio.Queue (get/put/task_done/join/empty/qsize)
+    so it is a drop-in replacement for the inter-stage queues in _stage_worker.
+    """
+
+    def __init__(self) -> None:
+        self._demand: asyncio.Queue = asyncio.Queue()
+        self._unfinished_tasks: int = 0
+        self._all_done: asyncio.Event = asyncio.Event()
+        self._all_done.set()
+        self._closed: bool = False
+
+    # ------------------------------------------------------------------
+    # Downstream (pull-stage workers call these)
+    # ------------------------------------------------------------------
+
+    async def get(self) -> Any:
+        """Signal readiness and wait to receive the next item."""
+        if self._closed:
+            return _PULL_CLOSED
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        self._demand.put_nowait(fut)
+        try:
+            return await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                return fut.result()
+            if not fut.done():
+                fut.cancel()
+            raise
+
+    def task_done(self) -> None:
+        """Mark one item as fully processed."""
+        self._unfinished_tasks -= 1
+        if self._unfinished_tasks == 0:
+            self._all_done.set()
+
+    async def join(self) -> None:
+        """Block until all delivered items have been task_done()."""
+        await self._all_done.wait()
+
+    # ------------------------------------------------------------------
+    # Upstream (producing workers call these)
+    # ------------------------------------------------------------------
+
+    async def put(self, item: Any) -> None:
+        """Wait for a ready downstream worker, then deliver item directly."""
+        while True:
+            if self._closed:
+                return
+            try:
+                fut = await asyncio.wait_for(self._demand.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            if fut.done():
+                continue
+            self._unfinished_tasks += 1
+            self._all_done.clear()
+            fut.set_result(item)
+            return
+
+    def put_nowait(self, item: Any) -> None:
+        raise RuntimeError("RendezvousChannel does not support put_nowait")
+
+    # ------------------------------------------------------------------
+    # Stats / control
+    # ------------------------------------------------------------------
+
+    def empty(self) -> bool:
+        return self._unfinished_tasks == 0
+
+    def qsize(self) -> int:
+        return self._unfinished_tasks
+
+    def close(self) -> None:
+        """Wake all workers that are waiting on demand, signalling shutdown."""
+        self._closed = True
+        while not self._demand.empty():
+            try:
+                fut = self._demand.get_nowait()
+                if not fut.done():
+                    fut.set_result(_PULL_CLOSED)
+            except asyncio.QueueEmpty:
+                break
 
 
 @dataclass
@@ -66,8 +163,11 @@ class Stage:
     task_concurrency_limits: Dict[str, int] = field(default_factory=dict)
     on_success: Optional[Callable[[Any, Any, Dict[str, Any]], Any]] = None
     on_failure: Optional[Callable[[Any, Exception, Dict[str, Any]], Any]] = None
+    on_skip: Optional[Callable[[Any, Any, Dict[str, Any]], Any]] = None
     skip_if: Optional[Callable[[Any], bool]] = None
     queue_capacity: Optional[int] = None
+    pull: bool = False
+    call_concurrency: Optional[int] = None
 
     def validate(self) -> None:
         """
@@ -94,6 +194,17 @@ class Stage:
         if self.stage_attempts < 1:
             raise StageValidationError(
                 f"Stage '{self.name}' stage_attempts must be at least 1, got {self.stage_attempts}"
+            )
+        if self.task_concurrency_limits:
+            task_names = {getattr(t, "__name__", None) for t in self.tasks}
+            unknown = set(self.task_concurrency_limits) - task_names
+            if unknown:
+                raise StageValidationError(
+                    f"Stage '{self.name}': task_concurrency_limits references unknown task(s): {unknown}"
+                )
+        if self.pull and self.retry == "per_stage":
+            raise StageValidationError(
+                f"Stage '{self.name}': pull=True is not compatible with retry='per_stage'"
             )
 
 
@@ -323,6 +434,9 @@ class Pipeline:
         if not stages:
             raise PipelineError("Pipeline must have at least one stage")
 
+        if stages[0].pull:
+            raise PipelineError("The first stage cannot be a pull stage")
+
         for stage in stages:
             stage.validate()
 
@@ -331,17 +445,22 @@ class Pipeline:
         self._status_tracker = status_tracker
 
         self._stop_event = asyncio.Event()
-        self._queues: List[asyncio.PriorityQueue] = []
+        self._queues: List[Any] = []
         for stage in stages:
-            if stage.queue_capacity is not None:
-                maxsize = stage.queue_capacity
+            if stage.pull:
+                self._queues.append(RendezvousChannel())
             else:
-                # Smart Default: Buffer size based on worker count
-                # Factor of 10 allows for some buffering but prevents infinite growth
-                maxsize = max(1, stage.workers * 10)
-
-            self._queues.append(asyncio.PriorityQueue(maxsize=maxsize))
-        self._msg_counter = 0
+                if stage.queue_capacity is not None:
+                    maxsize = stage.queue_capacity
+                else:
+                    maxsize = max(1, stage.workers * 10)
+                self._queues.append(asyncio.PriorityQueue(maxsize=maxsize))
+        self._msg_counter = itertools.count()
+        # Unbounded per-stage overflow queues for per_stage retries — prevents deadlock
+        # when all workers fail simultaneously with a full input queue (bug 4).
+        self._retry_queues: Dict[int, asyncio.Queue] = {
+            i: asyncio.Queue() for i in range(len(stages))
+        }
         self._results: Deque[PipelineResult] = deque()
         self._sequence_counter = 0
         self._items_processed = 0
@@ -353,6 +472,7 @@ class Pipeline:
         self._worker_states: Dict[str, WorkerState] = {}
         self._worker_metrics: Dict[str, WorkerMetrics] = {}
         self._task_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
+        self._call_semaphores: Dict[str, asyncio.Semaphore] = {}
         self._initialize_worker_tracking()
         self._initialize_semaphores()
 
@@ -454,12 +574,14 @@ class Pipeline:
                 )
 
     def _initialize_semaphores(self) -> None:
-        """Initialize semaphores for task concurrency limits."""
+        """Initialize semaphores for task and call concurrency limits."""
         for stage in self.stages:
             if stage.task_concurrency_limits:
                 self._task_semaphores[stage.name] = {}
                 for task_name, limit in stage.task_concurrency_limits.items():
                     self._task_semaphores[stage.name][task_name] = asyncio.Semaphore(limit)
+            if stage.call_concurrency is not None:
+                self._call_semaphores[stage.name] = asyncio.Semaphore(stage.call_concurrency)
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
         """
@@ -545,7 +667,7 @@ class Pipeline:
             failed_items=[],
         )
 
-    def _add_result(
+    async def _add_result(
         self,
         res_id: Any,
         res_value: Any,
@@ -567,7 +689,7 @@ class Pipeline:
         result = PipelineResult(id=res_id, value=res_value, sequence_id=seq_id, metadata=metadata)
 
         if hasattr(self, "_stream_queue"):
-            self._stream_queue.put_nowait(result)
+            await self._stream_queue.put(result)
         elif self.collect_results:
             self._results.append(result)
 
@@ -602,8 +724,7 @@ class Pipeline:
             payload = self._prepare_payload(item)
             # (priority, sequence, data)
             # We use _msg_counter to ensure stability (FIFO for same priority)
-            seq = self._msg_counter
-            self._msg_counter += 1
+            seq = next(self._msg_counter)
             await q.put((priority, seq, (payload, 1)))
 
             logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name} prio={priority}")
@@ -637,8 +758,7 @@ class Pipeline:
 
         async for item in items:
             payload = self._prepare_payload(item)
-            seq = self._msg_counter
-            self._msg_counter += 1
+            seq = next(self._msg_counter)
             await q.put((priority, seq, (payload, 1)))
 
             logger.debug(f"Enqueued item id={payload['id']} to stage={stage_name} prio={priority}")
@@ -716,6 +836,22 @@ class Pipeline:
             await self._runner_task
             self._runner_task = None
 
+    async def _retry_feeder(self, stage_index: int, input_q: asyncio.Queue) -> None:
+        """Moves retry items from the unbounded retry queue into the bounded input queue.
+
+        Runs as a single task per stage so only one coroutine ever blocks on
+        input_q.put(), eliminating the deadlock where every worker blocks
+        simultaneously on a full queue.
+        """
+        rq = self._retry_queues[stage_index]
+        while not self._stop_event.is_set() or not rq.empty():
+            try:
+                item = await asyncio.wait_for(rq.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            await input_q.put(item)
+            rq.task_done()
+
     async def _backend_runner(self) -> None:
         """Internal runner that manages the TaskGroup and workers."""
         try:
@@ -728,6 +864,8 @@ class Pipeline:
                         if stage_index + 1 < len(self._queues)
                         else None
                     )
+
+                    tg.create_task(self._retry_feeder(stage_index, input_q))
 
                     for i in range(stage.workers):
                         worker_name = f"{name_prefix}-W{i}"
@@ -900,6 +1038,7 @@ class Pipeline:
         self,
         items: Sequence[Any],
         progress: bool = False,
+        buffer_size: int = 0,
     ) -> AsyncIterator[PipelineResult]:
         """
         Stream results as they complete.
@@ -933,7 +1072,7 @@ class Pipeline:
             - After streaming completes, `_results` remains empty (preserves original
               `collect_results` setting)
         """
-        result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue()
+        result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue(maxsize=buffer_size)
         original_collect = self.collect_results
 
         self._stream_queue = result_queue
@@ -994,12 +1133,23 @@ class Pipeline:
 
         # Drain queues to prevent join() from hanging and stop workers from picking up new items
         for q in self._queues:
-            while not q.empty():
-                try:
-                    q.get_nowait()
-                    q.task_done()
-                except (asyncio.QueueEmpty, ValueError):
-                    break
+            if isinstance(q, RendezvousChannel):
+                if not q.empty():
+                    logger.warning(
+                        f"Shutdown: {q.qsize()} pull-stage item(s) were in-flight and will not complete"
+                    )
+                q.close()
+            else:
+                dropped = 0
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                        q.task_done()
+                        dropped += 1
+                    except (asyncio.QueueEmpty, ValueError):
+                        break
+                if dropped:
+                    logger.warning(f"Shutdown: discarded {dropped} unprocessed item(s) from queue")
 
         if self._runner_task:
             # If we want to force cancel, we would cancel the runner task.
@@ -1114,9 +1264,15 @@ class Pipeline:
                 # Unpack priority item
                 # (priority, sequence, (payload, attempt))
                 prio_item = await asyncio.wait_for(input_q.get(), timeout=0.1)
-                priority, seq_in, (payload, attempt) = prio_item
             except asyncio.TimeoutError:
                 continue
+
+            # Pull stages receive _PULL_CLOSED when the pipeline is shutting down.
+            if prio_item is _PULL_CLOSED:
+                input_q.task_done()
+                return
+
+            priority, seq_in, (payload, attempt) = prio_item
 
             item_id = payload.get("id")
             start_time = time.time()
@@ -1125,8 +1281,10 @@ class Pipeline:
             self._worker_states[name].current_item_id = item_id
             self._worker_states[name].processing_since = start_time
 
-            # Set context variable for task status updates
+            # Set context variables for task status updates and call_concurrency
             token = worker_state_var.set(self._worker_states[name])
+            call_sem = self._call_semaphores.get(stage.name)
+            call_sem_token = _call_semaphore_var.set(call_sem)
 
             try:
                 logger.debug(
@@ -1145,6 +1303,14 @@ class Pipeline:
                 if should_skip:
                     logger.info(f"[{name}] SKIP stage={stage.name} id={item_id}")
                     await self._emit_status(item_id, stage.name, "skipped", worker=name)
+                    if stage.on_skip:
+                        try:
+                            if asyncio.iscoroutinefunction(stage.on_skip):
+                                await stage.on_skip(item_id, payload["value"], payload)
+                            else:
+                                stage.on_skip(item_id, payload["value"], payload)
+                        except Exception as e:
+                            logger.error(f"[{name}] Error in on_skip callback: {e}")
                     # Pass-through value
                     result_value = payload["value"]
                 else:
@@ -1162,7 +1328,7 @@ class Pipeline:
                             item_id,
                             payload,
                             attempt,
-                            input_q,
+                            stage_index,
                             priority,
                         )
                         if result_value is None:
@@ -1178,8 +1344,7 @@ class Pipeline:
 
                 if output_q is not None:
                     # Propagate priority, use new sequence number for stability in next queue
-                    seq_out = self._msg_counter
-                    self._msg_counter += 1
+                    seq_out = next(self._msg_counter)
                     await output_q.put((priority, seq_out, (payload, 1)))
 
                     is_not_last_stage = stage_index + 1 < len(self.stages)
@@ -1201,9 +1366,9 @@ class Pipeline:
                             if k not in ("id", "value", "_sequence_id")
                         }
 
-                        self._add_result(res_id, res_value, seq_id, meta)
+                        await self._add_result(res_id, res_value, seq_id, meta)
 
-                if stage.on_success:
+                if stage.on_success and not should_skip:
                     try:
                         if asyncio.iscoroutinefunction(stage.on_success):
                             await stage.on_success(item_id, payload["value"], payload)
@@ -1241,12 +1406,13 @@ class Pipeline:
                 if stage.on_failure:
                     try:
                         if asyncio.iscoroutinefunction(stage.on_failure):
-                            await stage.on_failure(item_id, original_error, {})
+                            await stage.on_failure(item_id, original_error, payload)
                         else:
-                            stage.on_failure(item_id, original_error, {})
+                            stage.on_failure(item_id, original_error, payload)
                     except Exception as e:
                         logger.error(f"[{name}] Error in on_failure callback: {e}")
             finally:
+                _call_semaphore_var.reset(call_sem_token)
                 worker_state_var.reset(token)
                 self._worker_states[name].status = "idle"
                 self._worker_states[name].current_item_id = None
@@ -1320,7 +1486,7 @@ class Pipeline:
         item_id: Any,
         payload: Dict[str, Any],
         attempt: int,
-        input_q: asyncio.Queue,
+        stage_index: int,
         priority: int,
     ) -> Optional[Any]:
         """
@@ -1333,22 +1499,31 @@ class Pipeline:
             item_id: Item identifier
             payload: Full payload dict
             attempt: Current attempt number
-            input_q: Input queue for re-queueing
+            stage_index: Index of this stage (used to route retries)
             priority: Priority level
 
         Returns:
             Final value if successful, None if retried or failed
         """
         current = value
+        _current_task_name = stage.tasks[0].__name__ if stage.tasks else "unknown"
+        _task_start = time.time()
 
         try:
             for idx, task in enumerate(stage.tasks):
                 task_name = task.__name__
+                _current_task_name = task_name
+                _task_start = time.time()
                 self._worker_states[worker_name].current_task = task_name
+                task_start = _task_start
 
                 logger.debug(
                     f"[{worker_name}] START task {idx + 1}/{len(stage.tasks)}="
                     f"{task_name} id={item_id}"
+                )
+
+                await self._emit_task_event(
+                    item_id, stage.name, task_name, worker_name, "start", attempt
                 )
 
                 if stage.unpack_args:
@@ -1369,6 +1544,11 @@ class Pipeline:
                 else:
                     current = await coro
 
+                await self._emit_task_event(
+                    item_id, stage.name, task_name, worker_name, "complete", attempt,
+                    duration=time.time() - task_start,
+                )
+
                 logger.debug(
                     f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
                 )
@@ -1377,6 +1557,10 @@ class Pipeline:
 
         except Exception as e:
             original_error = extract_exception(e)
+            await self._emit_task_event(
+                item_id, stage.name, _current_task_name, worker_name, "fail", attempt,
+                error=original_error, duration=time.time() - _task_start,
+            )
 
             if attempt < stage.stage_attempts:
                 logger.debug(
@@ -1385,9 +1569,8 @@ class Pipeline:
                 )
 
                 # Re-queue with same priority (or could boost it here)
-                seq_retry = self._msg_counter
-                self._msg_counter += 1
-                await input_q.put((priority, seq_retry, (payload, attempt + 1)))
+                seq_retry = next(self._msg_counter)
+                await self._retry_queues[stage_index].put((priority, seq_retry, (payload, attempt + 1)))
 
                 await self._emit_status(
                     item_id,
@@ -1408,6 +1591,15 @@ class Pipeline:
                 await self._emit_status(
                     item_id, stage.name, "failed", metadata={"error": str(original_error)}
                 )
+
+                if stage.on_failure:
+                    try:
+                        if asyncio.iscoroutinefunction(stage.on_failure):
+                            await stage.on_failure(item_id, original_error, payload)
+                        else:
+                            stage.on_failure(item_id, original_error, payload)
+                    except Exception as cb_err:
+                        logger.error(f"[{worker_name}] Error in on_failure callback: {cb_err}")
 
                 return None
 

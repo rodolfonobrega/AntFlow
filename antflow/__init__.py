@@ -3,7 +3,21 @@ AntFlow: Async execution library with concurrent.futures-style API and advanced 
 """
 
 from ._version import __version__
-from .context import set_task_status
+
+# Auto-activate the fastest available event loop for this platform.
+# uvloop on Linux/macOS, winloop on Windows — transparent to the user.
+import sys as _sys
+try:
+    if _sys.platform in ("win32", "cygwin", "cli"):
+        import winloop as _fast_loop
+    else:
+        import uvloop as _fast_loop
+    _fast_loop.install()
+    del _fast_loop
+except ImportError:
+    pass
+del _sys
+from .context import rate_limit, set_task_status
 from .exceptions import (
     AntFlowError,
     ExecutorShutdownError,
@@ -58,5 +72,6 @@ __all__ = [
     "WorkerMetrics",
     "WorkerState",
     "WorkerStatus",
+    "rate_limit",
     "set_task_status",
 ]
