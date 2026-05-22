@@ -114,16 +114,9 @@ pipeline = Pipeline(stages=[
 
 ## `task_concurrency_limits` — gate one function in a multi-task stage
 
-**The problem it solves:** you have a stage with two tasks. One task is long-running (needs many workers). The other task is fast but rate-limited by an external API (needs few concurrent). You cannot satisfy both constraints with a single `workers=N`.
+Use this when your stage has **two tasks**: one fast and rate-limited (the gate), one slow and long-running (where workers accumulate). You can't satisfy both constraints with a single `workers=N`.
 
-```
-I want 50 jobs monitored simultaneously (poll takes minutes)
-But the upload API only allows 2 concurrent calls
-If workers=2 → only 2 jobs monitored ever
-If workers=50 → all 50 try to upload at once → 429 errors
-```
-
-**Solution:** 50 workers, but only 2 can be inside `upload()` at the same time. Workers wait at the upload gate, pass through quickly (2 seconds), then spend the next few minutes in `poll_until_done`. The gate empties; all 50 workers eventually end up polling.
+**Example:** upload a file (fast, 2s, max 2 concurrent) then poll until done (slow, minutes).
 
 ```python
 Stage(
@@ -134,11 +127,23 @@ Stage(
 )
 ```
 
-**How it works:** AntFlow wraps `upload()` with a semaphore. The semaphore is acquired before `upload()` is called and released when it returns. The slot is held for the **entire duration** of the function — including any `await asyncio.sleep()` inside it.
+What happens step by step:
 
-**The trap: the limit becomes the concurrency of the whole stage**
+```
+t=0s:   Workers 1 and 2 start upload. Workers 3-50 wait at the gate.
+t=2s:   Workers 1 and 2 finish upload → move into poll_until_done (stay there for minutes).
+        Workers 3 and 4 start upload. Workers 5-50 still waiting.
+t=4s:   Workers 3 and 4 → poll_until_done. Workers 5 and 6 upload.
+...
+t=50s:  All 50 workers are inside poll_until_done, each monitoring their own job.
+        The upload gate is empty — no more items to upload.
+```
 
-Because the slot is held until the function returns, `task_concurrency_limits={"fn": N}` is equivalent to saying "at most N workers are ever inside `fn` simultaneously." If workers spend most of their time in `fn`, you've effectively set `workers=N` — the extra workers are permanently blocked waiting to enter.
+Workers 1 and 2 don't go back to uploading. Once they pass through `upload()` they move to `poll_until_done` and stay there. The semaphore on `upload` only applies when a worker is entering that specific function — workers already in `poll_until_done` don't compete for it.
+
+**How it works:** AntFlow wraps `upload()` with a semaphore acquired before the call and released when it returns. The slot is held for the **entire duration of the function** — including any `await asyncio.sleep()` inside it.
+
+**The trap: applying this to a long-running function**
 
 ```python
 # POINTLESS — equivalent to just setting workers=5
@@ -150,13 +155,11 @@ Stage(
 )
 ```
 
-`poll_until_done` loops and sleeps for 30s between each check. The semaphore slot is held the entire time — through the API call, through the sleep, through every iteration. A slot is only freed when the function **returns** (job complete). With the limit set to 5, only 5 workers are inside `poll_until_done` at any instant. The other 495 are waiting at the gate.
+`poll_until_done` loops and sleeps for 60s between each check. The slot is held through every iteration, every sleep. It's only freed when the job finishes and the function returns. So at most 5 workers are ever inside the function — the other 495 wait outside doing nothing. Items still get processed, but 5 at a time, making the 500 workers pointless.
 
-Items still get processed eventually — workers cycle through 5 at a time. But the 500 workers you created give you no advantage over `workers=5`. You've made the code more complex for identical throughput.
+The rule: **the limited function must be a gate workers pass through quickly**, not the function where they spend most of their time. If workers accumulate inside the limited function, the limit becomes the effective concurrency of the whole stage.
 
-**`task_concurrency_limits` only helps when workers pass through the limited function quickly and spend most of their time elsewhere.** In the upload example, workers spend ~2 seconds uploading, then move on to `poll_until_done` for minutes — all 50 workers eventually accumulate in the poll phase. In the broken example, workers never leave the limited function — the limit is the stage's effective concurrency.
-
-If you need to throttle calls *inside* a long-running function without blocking workers from entering it, use `call_concurrency` instead.
+For throttling calls *inside* a long-running loop, use `call_concurrency` instead.
 
 ---
 
