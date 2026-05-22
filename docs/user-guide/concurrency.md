@@ -36,26 +36,74 @@ By default, stages push items forward as soon as they finish. The output sits in
 
 `pull=True` changes this: a downstream worker must **signal readiness** before it receives the next item. Upstream blocks until a worker is actually waiting — there is **zero buffer** between the stages.
 
-```
-Without pull=True:
-  [upload] → queue → [queue] → [queue] → [submit+poll workers]
-   Items pile up in the queue. Workers may grab stale items.
+### The OpenAI Batch API problem
 
-With pull=True on submit+poll:
-  [upload] → (blocked) ←→ [ready worker] → [submit+poll]
-   Item handed directly to a worker that is ready RIGHT NOW.
+Imagine a two-stage pipeline: `upload` → `submit_and_poll`.
+
+Upload is fast (a few seconds per file). Submit+poll is slow — after submitting, each worker loops checking the job status for minutes.
+
+**Without `pull=True`:**
+
+```
+t=0s:   Upload worker 1 finishes → pushes file_id_1 to queue
+t=2s:   Upload worker 2 finishes → pushes file_id_2 to queue
+t=4s:   Upload worker 1 finishes → pushes file_id_3 to queue
+...
+t=60s:  All 50 files uploaded. Queue has 50 file_ids sitting in it.
+        Poll workers start picking them up...
+        But job #1 has been sitting in the OpenAI queue for 60s already,
+        unmonitored. If it failed at t=10s, you won't know until t=70s+.
 ```
 
-**When to use it:** upstream stage is fast (uploads files in seconds), downstream stage is slow and long-running (monitors for minutes). Without `pull=True`, all uploads finish first and queue up, then polling workers scramble for items. With `pull=True`, each item moves downstream only when a poll worker is free — no job waits idle in a queue.
+The jobs are already running on OpenAI's side — they were submitted the moment they were uploaded, or even before — but your pipeline has no worker watching them. They're running blind.
+
+**With `pull=True` on submit_and_poll:**
+
+```
+t=0s:   Poll worker signals "I'm ready" → upload delivers file_id_1 directly
+        Worker immediately submits and starts polling.
+t=2s:   Another poll worker signals "I'm ready" → file_id_2 delivered directly
+        Worker immediately submits and starts polling.
+...
+Every file is being actively monitored the moment it's submitted.
+No file_id ever sits in a queue unattended.
+```
 
 ```python
+from antflow import Pipeline, Stage
+from antflow.context import concurrency_limit
+
+async def upload_file(file_path: str) -> str:
+    # uploads a JSONL file, returns file_id
+    return file_id
+
+async def submit_batch(file_id: str) -> str:
+    response = await openai_client.batches.create(input_file_id=file_id)
+    return response.id  # batch_id
+
+async def poll_until_done(batch_id: str) -> dict:
+    while True:
+        async with concurrency_limit():
+            batch = await openai_client.batches.retrieve(batch_id)
+        if batch.status == "completed":
+            return batch
+        if batch.status in ("failed", "expired", "cancelled"):
+            raise RuntimeError(f"Batch {batch_id} {batch.status}")
+        await asyncio.sleep(30)
+
 pipeline = Pipeline(stages=[
-    Stage("upload", workers=2, tasks=[upload_file]),
     Stage(
-        "poll",
+        "upload",
+        workers=2,
+        tasks=[upload_file],
+        queue_capacity=10,  # up to 10 file_paths waiting for an upload worker
+    ),
+    Stage(
+        "submit_and_poll",
         workers=50,
         tasks=[submit_batch, poll_until_done],
-        pull=True,   # worker signals "I'm ready" → upload delivers directly
+        pull=True,           # worker signals readiness → upload delivers directly
+        call_concurrency=5,  # max 5 concurrent poll API calls at once
     ),
 ])
 ```
