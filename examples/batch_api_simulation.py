@@ -14,7 +14,7 @@ import asyncio
 import time
 
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ async def approach_4():
         t["max_concurrent_jobs"] = max(t["max_concurrent_jobs"], t["concurrent_jobs"])
 
         while True:
-            async with rate_limit():
+            async with concurrency_limit():
                 t["concurrent_polls"] += 1
                 t["max_concurrent_polls"] = max(t["max_concurrent_polls"], t["concurrent_polls"])
                 await asyncio.sleep(POLL_CALL_TIME)

@@ -98,7 +98,9 @@ The `Stage` class is the building block of your pipeline. Here are all the avail
 | **`skip_if`** | `Callable` | `None` | Predicate function `(item) -> bool`. If `True`, the item skips this stage entirely. |
 | **`queue_capacity`** | `int` | `None` | Optional. Manually set input queue size. If `None` (default), uses smart limit (`workers * 10`). Set to `0` for infinite. |
 | **`pull`** | `bool` | `False` | Demand-driven mode. Workers pull items from upstream only when ready — upstream is blocked until a worker requests the next item. See [Pull Stages](#pull-stages). Incompatible with `retry="per_stage"`. Cannot be used on the first stage. |
-| **`call_concurrency`** | `int` | `None` | Max concurrent calls *within* running tasks. Unlike `task_concurrency_limits` (which limits how many tasks start), this limits calls inside long-running tasks via `rate_limit()`. See [Call Concurrency](#call-concurrency). |
+| **`call_concurrency`** | `int` | `None` | Max concurrent calls *within* running tasks. Wrap each call with `concurrency_limit()`. See [Call Concurrency](#call-concurrency). |
+| **`call_rate`** | `float` | `None` | Max call acquisitions per `call_rate_period`. Wrap each call with `rate_limit()` (leaky bucket). |
+| **`call_rate_period`** | `float` | `60.0` | Period in seconds for `call_rate`. Default: 60 seconds (i.e., per minute). |
 
 ### Important: task_concurrency_limits wraps the ENTIRE function
 
@@ -220,8 +222,8 @@ Option B is great, but it has one trade-off: the worker only starts uploading th
 
 `pull=True` lets you separate the stages while keeping exact control:
 
-*   **Upload stage** keeps a buffer of pre-uploaded files (controlled by `queue_capacity`), so upload workers are always busy preparing the next job.
-*   **Poll stage** uses `pull=True` — a poll worker only receives an uploaded file when it is free to submit and monitor it immediately. There is **no queue** between the two stages; items are handed off directly to a ready worker.
+*   **Upload stage** accepts up to `queue_capacity` file paths at a time (the queue holds paths *waiting to be uploaded*, not already-uploaded files). Upload workers process them continuously.
+*   **Poll stage** uses `pull=True` — a poll worker only receives a file_id when it is free to submit and monitor it immediately, preventing unmonitored jobs from accumulating.
 
 ```python
 pipeline = Pipeline(stages=[
@@ -229,7 +231,7 @@ pipeline = Pipeline(stages=[
         name="Upload",
         workers=2,
         tasks=[upload_file],
-        queue_capacity=10,   # pre-upload up to 10 files ahead
+        queue_capacity=10,   # up to 10 file_paths waiting for an upload worker
     ),
     Stage(
         name="Submit_and_Poll",
@@ -242,9 +244,9 @@ pipeline = Pipeline(stages=[
 
 **How it works:**
 
-1. The 2 upload workers run ahead and fill a buffer of up to 10 pre-uploaded files.
-2. When a poll worker finishes its current job, it signals readiness — the upload stage delivers the next pre-uploaded file directly to that worker.
-3. The worker immediately submits and starts polling. No uploaded file ever sits unmonitored.
+1. Up to 10 file paths queue in the upload stage's input queue; the 2 upload workers process them continuously.
+2. When a poll worker finishes its current job, it signals readiness — the upload stage delivers the next file_id directly to that worker.
+3. The worker immediately submits and starts polling. No uploaded file_id ever sits unmonitored.
 
 **Verdict:** ✅ **Best when uploads are slow and you want to keep upload workers busy between polling cycles.**
 
@@ -350,15 +352,15 @@ With `task_concurrency_limits={"poll_job": 5}`, only 5 workers would run at a ti
 
 What you actually want: all 500 workers alive (each monitoring its job), but only 5 making API calls simultaneously. Workers sleep between polls without holding any rate-limit slot.
 
-### Solution: `call_concurrency` + `rate_limit()`
+### Solution: `call_concurrency` + `concurrency_limit()`
 
 ```python
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 async def poll_until_done(job_id: str):
     while True:
-        async with rate_limit():       # acquires 1 of N slots
+        async with concurrency_limit():  # acquires 1 of N slots
             status = await openai.check(job_id)
         if status == "done":           # slot already released
             return job_id
@@ -380,7 +382,7 @@ pipeline = Pipeline(stages=[
 ### How it works
 
 1. You set `call_concurrency=N` on the Stage — AntFlow creates a shared semaphore of size N.
-2. Inside your task, wrap each API call with `async with rate_limit():`.
+2. Inside your task, wrap each API call with `async with concurrency_limit():`.
 3. At most N calls happen simultaneously across all workers in that stage.
 4. Workers that are sleeping or doing other work (submit, logging) do NOT hold a slot.
 
@@ -389,7 +391,8 @@ pipeline = Pipeline(stages=[
 | Scenario | Use |
 |----------|-----|
 | Multi-task stage where one task must be throttled (e.g., validate → api_call → save) | `task_concurrency_limits` |
-| Long-running task with internal loop that makes periodic API calls | `call_concurrency` + `rate_limit()` |
+| Long-running task, limit concurrent API calls | `call_concurrency` + `concurrency_limit()` |
+| Long-running task, limit throughput (N calls/period) | `call_rate` + `rate_limit()` |
 | Simple 1:1 "one task = one API call" | Either works; `task_concurrency_limits` is simpler |
 
 ### Complete example: OpenAI Batch API
@@ -397,7 +400,7 @@ pipeline = Pipeline(stages=[
 ```python
 import asyncio
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 async def upload_file(file_path: str) -> str:
     """Upload a JSONL file to OpenAI. Returns file_id."""
@@ -412,7 +415,7 @@ async def submit_batch(file_id: str) -> str:
 async def poll_until_done(batch_id: str) -> str:
     """Poll until the batch job completes. Returns batch_id when done."""
     while True:
-        async with rate_limit():
+        async with concurrency_limit():
             response = await openai_client.batches.retrieve(batch_id)
         if response.status == "completed":
             return batch_id
@@ -425,7 +428,7 @@ pipeline = Pipeline(stages=[
         name="upload",
         workers=2,
         tasks=[upload_file],
-        queue_capacity=10,       # keep 10 files pre-uploaded and ready
+        queue_capacity=10,       # up to 10 file_paths waiting for an upload worker
     ),
     Stage(
         name="submit",
@@ -445,11 +448,11 @@ results = await pipeline.run(file_paths)
 ```
 
 This gives you:
-- **2 workers** uploading files, with **10 pre-uploaded** files buffered
+- **2 workers** uploading files; at most 10 file_paths queue while waiting for a free upload worker
 - **2 workers** submitting batches (only when a poll worker requests)
 - **500 jobs** actively being monitored on OpenAI
 - **Only 5** poll API calls happening at any instant
-- Workers sleep between polls **without holding** a rate-limit slot
+- Workers sleep between polls **without holding** a concurrency slot
 
 ---
 

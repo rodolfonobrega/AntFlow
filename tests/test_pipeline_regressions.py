@@ -8,7 +8,6 @@ import pytest
 from antflow import Pipeline, Stage
 from antflow.exceptions import StageValidationError
 
-
 # ---------------------------------------------------------------------------
 # on_failure called in per_stage mode
 # ---------------------------------------------------------------------------

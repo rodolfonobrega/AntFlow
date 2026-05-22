@@ -78,3 +78,25 @@ class BaseDashboard(ABC):
             snapshot: Current pipeline state to display
         """
         ...
+
+    @staticmethod
+    def _progress_units(snapshot: DashboardSnapshot, total_items: int) -> tuple[int, int]:
+        """
+        Compute stage-weighted progress for a smooth bar/ETA across multi-stage pipelines.
+
+        Each item must pass through every stage, so total work = total_items * num_stages.
+        Counting only final-stage output makes the bar sit near 0% then jump to 100%.
+
+        Args:
+            snapshot: Current pipeline state
+            total_items: Total number of input items
+
+        Returns:
+            (done_units, total_units) where done_units is the sum of per-stage
+            completions and total_units is total_items * num_stages (>= 1).
+        """
+        stage_stats = snapshot.pipeline_stats.stage_stats
+        num_stages = len(stage_stats) or 1
+        total_units = max(total_items * num_stages, 1)
+        done_units = sum(s.completed_items for s in stage_stats.values())
+        return done_units, total_units

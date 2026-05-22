@@ -66,7 +66,15 @@ class ProgressDisplay:
         else:
             rate = 0.0
 
-        self._render(completed, failed, rate)
+        # Stage-weighted progress so the bar advances smoothly through all stages
+        # instead of staying near 0% until the final stage drains.
+        stage_stats = stats.stage_stats
+        num_stages = len(stage_stats) or 1
+        total_units = max(self.total * num_stages, 1)
+        done_units = sum(s.completed_items for s in stage_stats.values())
+        pct = done_units / total_units * 100
+
+        self._render(completed, failed, rate, pct=pct)
 
     def on_finish(
         self, results: List[PipelineResult], summary: ErrorSummary
@@ -79,14 +87,21 @@ class ProgressDisplay:
         self._render(completed, summary.total_failed, rate)
         self._finish(len(results), summary.total_failed, elapsed)
 
-    def _render(self, completed: int, failed: int, rate: float) -> None:
-        """Render the progress bar to terminal."""
+    def _render(
+        self, completed: int, failed: int, rate: float, pct: Optional[float] = None
+    ) -> None:
+        """Render the progress bar to terminal.
+
+        If pct is given (stage-weighted), the bar tracks it; otherwise it falls
+        back to completed/total (used by on_start/on_finish).
+        """
         if self.total == 0:
             pct = 100.0
             filled = self.width
         else:
-            pct = (completed / self.total) * 100
-            filled = int(self.width * completed / self.total)
+            if pct is None:
+                pct = (completed / self.total) * 100
+            filled = int(self.width * pct / 100)
 
         bar = self.fill_char * filled + self.empty_char * (self.width - filled)
 

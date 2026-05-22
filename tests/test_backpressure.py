@@ -82,4 +82,6 @@ async def test_backpressure_propagation():
     print(f"\nStats: {stats}")
 
     # Verify we got results
-    assert len(pipeline.results) == 10, f"Expected 10 results, got {len(pipeline.results)}. Stats: {stats}"
+    assert len(pipeline.results) == 10, (
+        f"Expected 10 results, got {len(pipeline.results)}. Stats: {stats}"
+    )

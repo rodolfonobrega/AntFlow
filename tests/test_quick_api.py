@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from antflow import Pipeline, PipelineResult, Stage
+from antflow import Pipeline
 
 
 async def double(x: int) -> int:

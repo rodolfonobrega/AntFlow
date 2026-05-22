@@ -31,7 +31,7 @@ if sys.version_info >= (3, 11):
 else:
     from taskgroup import TaskGroup
 
-from .context import _call_semaphore_var, worker_state_var
+from .context import _call_limiter_var, _call_semaphore_var, _last_update_time, worker_state_var
 from .exceptions import PipelineError, StageValidationError
 from .tracker import StatusEvent, StatusTracker
 from .types import (
@@ -93,6 +93,8 @@ class RendezvousChannel:
 
     def task_done(self) -> None:
         """Mark one item as fully processed."""
+        if self._unfinished_tasks <= 0:
+            return
         self._unfinished_tasks -= 1
         if self._unfinished_tasks == 0:
             self._all_done.set()
@@ -109,6 +111,8 @@ class RendezvousChannel:
         """Wait for a ready downstream worker, then deliver item directly."""
         while True:
             if self._closed:
+                # Channel was closed (pipeline shutdown). Dropping the item is
+                # intentional here — shutdown() logs a warning for in-flight items.
                 return
             try:
                 fut = await asyncio.wait_for(self._demand.get(), timeout=0.1)
@@ -168,6 +172,8 @@ class Stage:
     queue_capacity: Optional[int] = None
     pull: bool = False
     call_concurrency: Optional[int] = None
+    call_rate: Optional[float] = None
+    call_rate_period: float = 60.0
 
     def validate(self) -> None:
         """
@@ -200,7 +206,8 @@ class Stage:
             unknown = set(self.task_concurrency_limits) - task_names
             if unknown:
                 raise StageValidationError(
-                    f"Stage '{self.name}': task_concurrency_limits references unknown task(s): {unknown}"
+                    f"Stage '{self.name}': task_concurrency_limits"
+                    f" references unknown task(s): {unknown}"
                 )
         if self.pull and self.retry == "per_stage":
             raise StageValidationError(
@@ -423,7 +430,8 @@ class Pipeline:
         Args:
             stages: List of Stage objects defining the pipeline
             collect_results: If True, collects results from the final stage into `self.results`.
-                If False, results are discarded after processing (useful for fire-and-forget or side-effect only pipelines).
+                If False, results are discarded after processing (useful for
+                fire-and-forget or side-effect only pipelines).
                 Defaults to True.
             status_tracker: Optional StatusTracker for monitoring item status
 
@@ -473,6 +481,7 @@ class Pipeline:
         self._worker_metrics: Dict[str, WorkerMetrics] = {}
         self._task_semaphores: Dict[str, Dict[str, asyncio.Semaphore]] = {}
         self._call_semaphores: Dict[str, asyncio.Semaphore] = {}
+        self._call_limiters: Dict[str, Any] = {}
         self._initialize_worker_tracking()
         self._initialize_semaphores()
 
@@ -501,7 +510,15 @@ class Pipeline:
 
         for i, stage in enumerate(self.stages):
             # Pending
-            pending = self._queues[i].qsize()
+            q = self._queues[i]
+            if isinstance(q, RendezvousChannel):
+                # Pull stages have zero buffer: qsize() counts items already
+                # delivered to a worker (in-flight), which are accounted for by
+                # in_progress_items below. Reporting them as pending too would
+                # double-count them in items_in_flight.
+                pending = 0
+            else:
+                pending = q.qsize()
             queue_sizes[stage.name] = pending
 
             # In Progress (Busy Workers)
@@ -582,6 +599,11 @@ class Pipeline:
                     self._task_semaphores[stage.name][task_name] = asyncio.Semaphore(limit)
             if stage.call_concurrency is not None:
                 self._call_semaphores[stage.name] = asyncio.Semaphore(stage.call_concurrency)
+            if stage.call_rate is not None:
+                from aiolimiter import AsyncLimiter
+                self._call_limiters[stage.name] = AsyncLimiter(
+                    stage.call_rate, stage.call_rate_period
+                )
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
         """
@@ -622,12 +644,14 @@ class Pipeline:
         Get complete dashboard snapshot with all current state.
 
         Returns:
-            [DashboardSnapshot][antflow.types.DashboardSnapshot] with worker states, metrics, and pipeline stats
+            [DashboardSnapshot][antflow.types.DashboardSnapshot]
+            with worker states, metrics, and pipeline stats
 
         Example:
             ```python
             snapshot = pipeline.get_dashboard_snapshot()
-            print(f"Active workers: {sum(1 for s in snapshot.worker_states.values() if s.status == 'busy')}")
+            busy = sum(1 for s in snapshot.worker_states.values() if s.status == "busy")
+            print(f"Active workers: {busy}")
             print(f"Items processed: {snapshot.pipeline_stats.items_processed}")
             ```
         """
@@ -826,8 +850,22 @@ class Pipeline:
         # Note: If a worker crashes, the queue might not join properly without
         # careful error handling, but queue.join() waits for task_done() calls.
         logger.debug("Waiting for queues to drain...")
-        for q in self._queues:
-            await q.join()
+        # per_stage retries flow main_queue -> _retry_queues -> main_queue via
+        # _retry_feeder. A single pass over self._queues can return while a retry
+        # item is still in a retry queue (about to be re-injected), dropping it.
+        # Alternate between draining the main queues and the retry queues until a
+        # full pass finds everything empty. _retry_feeder calls rq.task_done()
+        # *after* input_q.put(), so once rq.join() returns the item is already in
+        # the main queue and the next pass will join on it.
+        while True:
+            for q in self._queues:
+                await q.join()
+            for rq in self._retry_queues.values():
+                await rq.join()
+            if all(q.empty() for q in self._queues) and all(
+                rq.empty() for rq in self._retry_queues.values()
+            ):
+                break
 
         logger.debug("Queues drained, signaling stop...")
         self._stop_event.set()
@@ -875,8 +913,8 @@ class Pipeline:
                         self._worker_tasks.append(task)
 
                 # Wait for stop signal
-                # Workers themselves monitor stop_event, so we just wait for them to finish
-                # which happens when stop_event is set AND queues are empty (per _stage_worker logic)
+                # Workers themselves monitor stop_event, so we just wait for them to finish,
+                # which happens when stop_event is set AND queues are empty.
                 # TaskGroup will wait for all tasks to complete upon exit.
 
         except Exception as e:
@@ -901,8 +939,9 @@ class Pipeline:
             progress: Show minimal progress bar (mutually exclusive with dashboard).
             dashboard: Built-in dashboard type: "compact", "detailed", or "full".
             custom_dashboard: User-provided dashboard implementing DashboardProtocol.
-            dashboard_update_interval: How often to update the dashboard in seconds (default: 0.5).
-                Only applies to DashboardProtocol-based displays (progress, dashboard, custom_dashboard).
+            dashboard_update_interval: How often to update the dashboard in seconds
+                (default: 0.5). Only applies to DashboardProtocol-based displays
+                (progress, dashboard, custom_dashboard).
                 Lower values = more frequent updates but higher CPU usage.
                 Recommended range: 0.1 to 1.0 seconds.
 
@@ -918,7 +957,9 @@ class Pipeline:
             results = await pipeline.run(items, dashboard="compact", dashboard_update_interval=0.2)
 
             # Custom dashboard with slower updates (lower CPU usage)
-            results = await pipeline.run(items, custom_dashboard=MyDashboard(), dashboard_update_interval=1.0)
+            results = await pipeline.run(
+                items, custom_dashboard=MyDashboard(), dashboard_update_interval=1.0
+            )
             ```
 
         Note:
@@ -1073,8 +1114,6 @@ class Pipeline:
               `collect_results` setting)
         """
         result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue(maxsize=buffer_size)
-        original_collect = self.collect_results
-
         self._stream_queue = result_queue
 
         display = None
@@ -1136,7 +1175,8 @@ class Pipeline:
             if isinstance(q, RendezvousChannel):
                 if not q.empty():
                     logger.warning(
-                        f"Shutdown: {q.qsize()} pull-stage item(s) were in-flight and will not complete"
+                        f"Shutdown: {q.qsize()} pull-stage item(s)"
+                        " were in-flight and will not complete"
                     )
                 q.close()
             else:
@@ -1268,8 +1308,9 @@ class Pipeline:
                 continue
 
             # Pull stages receive _PULL_CLOSED when the pipeline is shutting down.
+            # The sentinel was never counted as an unfinished task, so we must not
+            # call task_done() for it (that would underflow the channel counter).
             if prio_item is _PULL_CLOSED:
-                input_q.task_done()
                 return
 
             priority, seq_in, (payload, attempt) = prio_item
@@ -1281,14 +1322,20 @@ class Pipeline:
             self._worker_states[name].current_item_id = item_id
             self._worker_states[name].processing_since = start_time
 
-            # Set context variables for task status updates and call_concurrency
+            # Set context variables for task status updates and call_concurrency/call_rate
             token = worker_state_var.set(self._worker_states[name])
             call_sem = self._call_semaphores.get(stage.name)
             call_sem_token = _call_semaphore_var.set(call_sem)
+            call_limiter = self._call_limiters.get(stage.name)
+            call_limiter_token = _call_limiter_var.set(call_limiter)
+            # Reset the rate-limit clock so the first set_task_status() of each
+            # item is never suppressed by the previous item handled by this worker.
+            _last_update_time.set(0.0)
 
             try:
                 logger.debug(
-                    f"[{name}] START stage={stage.name} id={item_id} attempt={attempt} prio={priority}"
+                    f"[{name}] START stage={stage.name} id={item_id}"
+                    f" attempt={attempt} prio={priority}"
                 )
 
                 # SKIP Logic
@@ -1412,6 +1459,7 @@ class Pipeline:
                     except Exception as e:
                         logger.error(f"[{name}] Error in on_failure callback: {e}")
             finally:
+                _call_limiter_var.reset(call_limiter_token)
                 _call_semaphore_var.reset(call_sem_token)
                 worker_state_var.reset(token)
                 self._worker_states[name].status = "idle"
@@ -1465,7 +1513,8 @@ class Pipeline:
                     current = await wrapped(current)
 
                 logger.debug(
-                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
+                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}"
+                    f"={task_name} id={item_id}"
                 )
 
             except Exception as e:
@@ -1550,7 +1599,8 @@ class Pipeline:
                 )
 
                 logger.debug(
-                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}={task_name} id={item_id}"
+                    f"[{worker_name}] END task {idx + 1}/{len(stage.tasks)}"
+                    f"={task_name} id={item_id}"
                 )
 
             return current
@@ -1570,7 +1620,9 @@ class Pipeline:
 
                 # Re-queue with same priority (or could boost it here)
                 seq_retry = next(self._msg_counter)
-                await self._retry_queues[stage_index].put((priority, seq_retry, (payload, attempt + 1)))
+                await self._retry_queues[stage_index].put(
+                    (priority, seq_retry, (payload, attempt + 1))
+                )
 
                 await self._emit_status(
                     item_id,

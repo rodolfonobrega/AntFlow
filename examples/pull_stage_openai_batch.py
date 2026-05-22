@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ class BatchPipeline:
         when a worker is available — so no job is ever submitted without
         an observer.
 
-        rate_limit() acquires one of the call_concurrency slots so only N
+        concurrency_limit() acquires one of the call_concurrency slots so only N
         poll API calls happen at once.  The slot is released immediately
         after the call — sleeping between polls does NOT hold a slot.
         """
@@ -196,7 +196,7 @@ class BatchPipeline:
         attempts = 0
         while True:
             attempts += 1
-            async with rate_limit():
+            async with concurrency_limit():
                 status, result_ref = await self._poll_fn(batch_id)
             if status == "complete":
                 print(f"[poll]    {batch_id} done after {attempts} poll(s)")

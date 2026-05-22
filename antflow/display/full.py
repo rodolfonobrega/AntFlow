@@ -93,8 +93,6 @@ class FullDashboard(BaseDashboard):
 
     def _generate_layout(self, snapshot: DashboardSnapshot) -> Layout:
         """Generate the Rich layout for display."""
-        stats = snapshot.pipeline_stats
-
         layout = Layout()
         layout.split_column(
             Layout(name="header", size=3),
@@ -130,7 +128,9 @@ class FullDashboard(BaseDashboard):
         """Generate overview statistics panel."""
         stats = snapshot.pipeline_stats
         completed = stats.items_processed + stats.items_failed
-        progress_pct = (completed / self.total * 100) if self.total > 0 else 0
+        # Stage-weighted progress so the bar doesn't sit at ~0% until the last stage.
+        done_units, total_units = self._progress_units(snapshot, self.total)
+        progress_pct = done_units / total_units * 100
 
         if self.start_time:
             elapsed = time.time() - self.start_time
@@ -217,8 +217,10 @@ class FullDashboard(BaseDashboard):
         table.add_column("Info", style="dim white")
 
         if self._tracker:
-            items_to_show = min(self.total, self.max_items_shown)
-            for item_id in range(items_to_show):
+            # Iterate the actual tracked IDs (which may be strings/UUIDs), not
+            # range(0, N) — that assumption breaks for non-integer item IDs.
+            tracked_ids = self._tracker.get_tracked_ids()[: self.max_items_shown]
+            for item_id in tracked_ids:
                 status_event = self._tracker.get_status(item_id)
 
                 if status_event:

@@ -113,19 +113,21 @@ class DetailedDashboard(BaseDashboard):
         """Generate overall progress panel."""
         stats = snapshot.pipeline_stats
         completed = stats.items_processed + stats.items_failed
-        remaining = self.total - completed
 
-        pct = (completed / self.total * 100) if self.total > 0 else 0
+        # Stage-weighted progress: smooth bar/ETA across multi-stage pipelines.
+        done_units, total_units = self._progress_units(snapshot, self.total)
+        pct = done_units / total_units * 100
         bar_width = 40
-        filled = int(bar_width * completed / self.total) if self.total > 0 else 0
+        filled = int(bar_width * done_units / total_units)
         bar = "█" * filled + "░" * (bar_width - filled)
 
         if self.start_time:
             elapsed = time.time() - self.start_time
             rate = completed / elapsed if elapsed > 0 else 0
-            if rate > 0 and remaining > 0:
-                eta_secs = remaining / rate
-                eta = self._format_time(eta_secs)
+            unit_rate = done_units / elapsed if elapsed > 0 else 0
+            remaining_units = total_units - done_units
+            if unit_rate > 0 and remaining_units > 0:
+                eta = self._format_time(remaining_units / unit_rate)
             else:
                 eta = "--:--:--"
         else:

@@ -320,32 +320,24 @@ class AsyncExecutor:
         Raises:
             asyncio.TimeoutError: If timeout is exceeded
         """
-        pending = set(futures)
-
-        async def wait_for_any():
-            while pending:
-                done_tasks = [asyncio.create_task(f._done_event.wait()) for f in pending]
-
+        # Create exactly one waiter task per future (not one per loop iteration),
+        # and always cancel any leftovers in finally so nothing leaks.
+        waiters = {asyncio.create_task(f._done_event.wait()): f for f in futures}
+        try:
+            while waiters:
                 done, _ = await asyncio.wait(
-                    done_tasks, return_when=asyncio.FIRST_COMPLETED, timeout=timeout
+                    waiters.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=timeout
                 )
 
                 if not done:
-                    for task in done_tasks:
-                        task.cancel()
                     raise asyncio.TimeoutError()
 
-                for task in done_tasks:
-                    if not task.done():
-                        task.cancel()
-
-                completed = [f for f in pending if f.done()]
-                for future in completed:
-                    pending.remove(future)
+                for task in done:
+                    future = waiters.pop(task)
                     yield future
-
-        async for future in wait_for_any():
-            yield future
+        finally:
+            for task in waiters:
+                task.cancel()
 
     async def wait(
         self,
@@ -457,7 +449,10 @@ class AsyncExecutor:
         Shut down the executor.
 
         Args:
-            wait: If True, wait for all pending tasks to complete
+            wait: If True, wait for all pending tasks to complete. If False, the
+                stop signal is set without draining the queue, so tasks still
+                queued (and not picked up before workers exit) may be left
+                unprocessed. Use cancel_futures=True to fail them explicitly.
             cancel_futures: If True, cancel all pending futures
         """
         if self._shutdown:

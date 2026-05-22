@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, get_args
 
 from .types import ErrorSummary, FailedItem, StatusEvent, StatusType, TaskEvent
 
@@ -40,11 +40,16 @@ class StatusTracker:
         Initialize the status tracker.
 
         Args:
-            on_status_change: Optional callback invoked on each item [StatusEvent][antflow.types.StatusEvent]
-            on_task_start: Optional callback when a task starts executing ([TaskEvent][antflow.types.TaskEvent])
-            on_task_complete: Optional callback when a task completes successfully ([TaskEvent][antflow.types.TaskEvent])
-            on_task_retry: Optional callback when a task is retrying after failure ([TaskEvent][antflow.types.TaskEvent])
-            on_task_fail: Optional callback when a task fails after all retries ([TaskEvent][antflow.types.TaskEvent])
+            on_status_change: Optional callback invoked on each item
+                [StatusEvent][antflow.types.StatusEvent]
+            on_task_start: Optional callback when a task starts executing
+                ([TaskEvent][antflow.types.TaskEvent])
+            on_task_complete: Optional callback when a task completes successfully
+                ([TaskEvent][antflow.types.TaskEvent])
+            on_task_retry: Optional callback when a task is retrying after failure
+                ([TaskEvent][antflow.types.TaskEvent])
+            on_task_fail: Optional callback when a task fails after all retries
+                ([TaskEvent][antflow.types.TaskEvent])
         """
         self.on_status_change = on_status_change
         self.on_task_start = on_task_start
@@ -94,9 +99,19 @@ class StatusTracker:
             item_id: The item identifier
 
         Returns:
-            The most recent [StatusEvent][antflow.types.StatusEvent] for the item, or None if not found
+            The most recent [StatusEvent][antflow.types.StatusEvent]
+            for the item, or None if not found
         """
         return self._current_status.get(item_id)
+
+    def get_tracked_ids(self) -> List[Any]:
+        """
+        Get the IDs of all items the tracker has seen, in first-seen order.
+
+        Returns:
+            List of item identifiers (may be ints, strings, UUIDs, etc.)
+        """
+        return list(self._current_status.keys())
 
     def get_by_status(self, status: StatusType) -> List[StatusEvent]:
         """
@@ -117,7 +132,9 @@ class StatusTracker:
         Returns:
             Dictionary mapping status names to counts
         """
-        stats: Dict[str, int] = {"queued": 0, "in_progress": 0, "completed": 0, "failed": 0}
+        # Cover every StatusType (including "retrying" and "skipped") so an item
+        # in any valid state can't raise KeyError below.
+        stats: Dict[str, int] = {status: 0 for status in get_args(StatusType)}
 
         for event in self._current_status.values():
             stats[event.status] += 1
@@ -132,7 +149,8 @@ class StatusTracker:
             item_id: The item identifier
 
         Returns:
-            List of all [StatusEvents][antflow.types.StatusEvent] for the item, in chronological order
+            List of all [StatusEvents][antflow.types.StatusEvent]
+            for the item, in chronological order
         """
         return self._history.get(item_id, [])
 

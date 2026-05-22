@@ -1,6 +1,7 @@
 """Tests for Pipeline.stream() memory behavior."""
 
 import asyncio
+
 import pytest
 
 from antflow import Pipeline, Stage

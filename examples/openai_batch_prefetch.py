@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +366,7 @@ class PullBatchPipeline:
         attempts = 0
         while True:
             attempts += 1
-            async with rate_limit():
+            async with concurrency_limit():
                 status, result_ref = await self._poll_fn(job.openai_batch_id)
             if status == "complete":
                 print(f"[poll]    {job.job_id} done after {attempts} attempt(s)")
