@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-22
+
+### Added
+
+*   **`call_rate` / `call_rate_period` (leaky bucket rate limiting):** New `Stage` parameters that throttle throughput to N calls per time period using `aiolimiter`'s leaky bucket algorithm. Set `call_rate=N` and wrap calls with `async with rate_limit():`. An initial burst of N is allowed; subsequent calls are spaced at `call_rate_period / call_rate` seconds each.
+*   **`call_rate_has_capacity(amount=1) -> bool`:** Non-blocking check of remaining rate-limit budget. Useful for adaptive fallback logic.
+*   **New tests:** `test_rate_limit.py` (9 tests covering `concurrency_limit`, `rate_limit`, post-burst spacing, combined usage), `test_dashboard_snapshot.py` (7 tests for worker count, in-flight tracking, string IDs, progress monotonicity).
+
+### Changed
+
+*   **`rate_limit()` renamed to `concurrency_limit()`** — the old semaphore-based context manager is now `concurrency_limit()` to accurately describe what it does. The name `rate_limit()` is now used for the true leaky-bucket rate limiter.
+*   **`docs/user-guide/concurrency.md` rewritten** — clearer structure with a quick reference table at the top, dedicated `pull=True` section with visual diagrams, sharper `task_concurrency_limits` vs `call_concurrency` distinction, and examples in every section.
+*   **`docs/user-guide/pipeline.md`** — Stage config table updated with `call_rate` and `call_rate_period` rows; fixed `queue_capacity` comment to accurately describe items waiting for upload (not pre-uploaded files).
+*   **0 ruff lint errors** — all pre-existing E/F/I/N/W violations resolved.
+
 ## [0.8.0] - 2026-05-21
 
 ### Added
