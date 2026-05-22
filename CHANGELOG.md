@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-05-22
+
+### Fixed
+
+*   **RendezvousChannel demand-queue poisoning (`pull=True` stages):** `_stage_worker` was using `wait_for(input_q.get(), timeout=0.1)` for pull stages. Every timeout left a cancelled future in the demand queue; `put()` had to drain all of them to find a valid one, causing a livelock under high worker counts (e.g. 500 workers × 10 timeouts/s = 5 000 cancelled futures/s). Fix: pull stages now call `await input_q.get()` directly — no timeout, no cancelled futures.
+*   **Pull-stage workers hang on shutdown:** `join()` set `_stop_event` but did not close `RendezvousChannel`s. Workers blocked in `get()` would hang indefinitely after all items were processed, because no new items arrived and there was no timeout to escape. Fix: `join()` now calls `q.close()` on every `RendezvousChannel` after draining, which sends `_PULL_CLOSED` to all waiting workers so they exit cleanly.
+
 ## [0.8.1] - 2026-05-22
 
 ### Added
