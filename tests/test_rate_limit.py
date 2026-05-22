@@ -159,6 +159,44 @@ async def test_rate_limit_each_retry_acquires_limiter():
 
 
 # ---------------------------------------------------------------------------
+# task_concurrency_limits — all items processed, N at a time
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_task_concurrency_limits_processes_all_items():
+    """
+    task_concurrency_limits={"fn": N} does NOT permanently block workers.
+    All items are processed — N concurrently at a time, not just N total.
+    """
+    peak = 0
+    active = 0
+
+    async def slow_task(x):
+        nonlocal peak, active
+        active += 1
+        if active > peak:
+            peak = active
+        await asyncio.sleep(0.05)
+        active -= 1
+        return x
+
+    pipeline = Pipeline(stages=[
+        Stage(
+            "s",
+            workers=20,
+            tasks=[slow_task],
+            task_concurrency_limits={"slow_task": 3},
+        )
+    ])
+    results = await pipeline.run(list(range(20)))
+
+    # All 20 items must complete — workers cycle through 3 at a time, not 3 total
+    assert len(results) == 20
+    # Concurrency was respected — never more than 3 simultaneous
+    assert peak <= 3
+
+
+# ---------------------------------------------------------------------------
 # Integration: call spacing precision (sliding-window check)
 # ---------------------------------------------------------------------------
 
