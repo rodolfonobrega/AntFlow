@@ -134,9 +134,11 @@ Stage(
 )
 ```
 
-**How it works:** AntFlow wraps `upload()` with a semaphore. The semaphore is acquired before `upload()` is called and released when it returns. The slot is held for the **entire duration** of the function.
+**How it works:** AntFlow wraps `upload()` with a semaphore. The semaphore is acquired before `upload()` is called and released when it returns. The slot is held for the **entire duration** of the function — including any `await asyncio.sleep()` inside it.
 
-**The critical constraint — this only works for SHORT tasks:**
+**The trap: the limit becomes the concurrency of the whole stage**
+
+Because the slot is held until the function returns, `task_concurrency_limits={"fn": N}` is equivalent to saying "at most N workers are ever inside `fn` simultaneously." If workers spend most of their time in `fn`, you've effectively set `workers=N` — the extra workers are permanently blocked waiting to enter.
 
 ```python
 # BROKEN — only 5 workers will ever run. The other 495 wait forever.
@@ -148,9 +150,11 @@ Stage(
 )
 ```
 
-`poll_until_done` loops for minutes. During every `await asyncio.sleep(30)`, the semaphore slot is still occupied. Only 5 workers get a slot — the other 495 are blocked permanently. For long-running tasks with internal loops, use `call_concurrency` instead.
+`poll_until_done` loops and sleeps for 30s between each API check. The semaphore slot is held the entire time — through the API call, through the sleep, through the next iteration. A slot is only freed when the function returns (job done). With the limit set to 5, only 5 workers will ever enter `poll_until_done`. The other 495 sit blocked at the gate forever.
 
-**Rule of thumb:** `task_concurrency_limits` only makes sense when the limited function does one thing and returns quickly (seconds). It's a gate workers pass through, not a guard for a long-running loop.
+**`task_concurrency_limits` only helps when workers pass through the limited function quickly and spend most of their time elsewhere.** In the upload example, workers spend ~2 seconds uploading, then move on to `poll_until_done` for minutes. The gate is empty fast. In the broken example, workers never leave — the gate becomes the ceiling for the entire stage.
+
+If you need to throttle calls *inside* a long-running function without blocking workers from entering it, use `call_concurrency` instead.
 
 ---
 
