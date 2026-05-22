@@ -196,6 +196,111 @@ async def test_task_concurrency_limits_processes_all_items():
     assert peak <= 3
 
 
+@pytest.mark.asyncio
+async def test_task_vs_call_concurrency_behavior():
+    """
+    Demonstrates the fundamental difference between task_concurrency_limits
+    and call_concurrency for a long-running polling task.
+
+    The task simulates: check status → sleep → check again (like OpenAI batch polling).
+
+    task_concurrency_limits={"fn": 3}:
+      - The semaphore wraps the ENTIRE function.
+      - Only 3 workers are inside the function at any time — even while sleeping.
+      - Peak workers inside function == 3.
+      - Peak workers in API call == 3.
+
+    call_concurrency=3:
+      - The semaphore wraps only the API call block.
+      - All workers enter the function freely and sleep independently.
+      - Peak workers inside function >> 3 (most of the 20 run concurrently).
+      - Peak workers in API call == 3.
+    """
+    N_ITEMS = 20
+    LIMIT = 3
+
+    # --- task_concurrency_limits ---
+    inside_fn_a = 0
+    peak_fn_a = 0
+
+    async def poll_with_task_limit(x):
+        nonlocal inside_fn_a, peak_fn_a
+        inside_fn_a += 1
+        peak_fn_a = max(peak_fn_a, inside_fn_a)
+        await asyncio.sleep(0.05)   # first check
+        await asyncio.sleep(0.05)   # sleeping between checks (slot STILL held)
+        await asyncio.sleep(0.05)   # second check
+        inside_fn_a -= 1
+        return x
+
+    pipeline_a = Pipeline(stages=[
+        Stage(
+            "s",
+            workers=N_ITEMS,
+            tasks=[poll_with_task_limit],
+            task_concurrency_limits={"poll_with_task_limit": LIMIT},
+        )
+    ])
+    results_a = await pipeline_a.run(list(range(N_ITEMS)))
+
+    # --- call_concurrency ---
+    inside_fn_b = 0
+    inside_api_b = 0
+    peak_fn_b = 0
+    peak_api_b = 0
+
+    async def poll_with_call_concurrency(x):
+        nonlocal inside_fn_b, inside_api_b, peak_fn_b, peak_api_b
+        inside_fn_b += 1
+        peak_fn_b = max(peak_fn_b, inside_fn_b)
+
+        async with concurrency_limit():    # slot held ONLY during API call
+            inside_api_b += 1
+            peak_api_b = max(peak_api_b, inside_api_b)
+            await asyncio.sleep(0.05)      # first check
+            inside_api_b -= 1
+
+        await asyncio.sleep(0.05)          # sleeping — slot RELEASED
+
+        async with concurrency_limit():    # slot acquired again for second check
+            inside_api_b += 1
+            peak_api_b = max(peak_api_b, inside_api_b)
+            await asyncio.sleep(0.05)      # second check
+            inside_api_b -= 1
+
+        inside_fn_b -= 1
+        return x
+
+    pipeline_b = Pipeline(stages=[
+        Stage(
+            "s",
+            workers=N_ITEMS,
+            tasks=[poll_with_call_concurrency],
+            call_concurrency=LIMIT,
+        )
+    ])
+    results_b = await pipeline_b.run(list(range(N_ITEMS)))
+
+    # Both process all items
+    assert len(results_a) == N_ITEMS
+    assert len(results_b) == N_ITEMS
+
+    # task_concurrency_limits: at most LIMIT workers inside the function at any time
+    # (including during sleep — the slot is never released until the function returns)
+    assert peak_fn_a <= LIMIT, (
+        f"task_concurrency_limits: expected peak_fn <= {LIMIT}, got {peak_fn_a}"
+    )
+
+    # call_concurrency: workers enter the function freely — peak >> LIMIT
+    assert peak_fn_b > LIMIT, (
+        f"call_concurrency: expected peak_fn > {LIMIT} (workers run concurrently), got {peak_fn_b}"
+    )
+    # ...but API calls are still limited
+    assert peak_api_b <= LIMIT, (
+        f"call_concurrency: expected peak_api <= {LIMIT}, got {peak_api_b}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Integration: call spacing precision (sliding-window check)
 # ---------------------------------------------------------------------------
