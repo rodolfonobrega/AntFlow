@@ -228,6 +228,7 @@ Choose your learning path:
 
 - Python 3.9+
 - tenacity >= 8.0.0
+- aiolimiter >= 1.0.0
 
 ---
 
