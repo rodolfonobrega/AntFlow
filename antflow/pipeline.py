@@ -870,6 +870,12 @@ class Pipeline:
         logger.debug("Queues drained, signaling stop...")
         self._stop_event.set()
 
+        # Wake workers blocked on RendezvousChannel.get() — without this they
+        # would block forever since there are no more items and no timeout.
+        for q in self._queues:
+            if isinstance(q, RendezvousChannel):
+                q.close()
+
         if self._runner_task:
             await self._runner_task
             self._runner_task = None
@@ -1300,12 +1306,18 @@ class Pipeline:
             output_q: Output queue (None for final stage)
         """
         while not self._stop_event.is_set() or (not self._shutdown and not input_q.empty()):
-            try:
-                # Unpack priority item
-                # (priority, sequence, (payload, attempt))
-                prio_item = await asyncio.wait_for(input_q.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                continue
+            # Pull stages use a RendezvousChannel: call get() directly so we
+            # never put cancelled futures into the demand queue.  Shutdown is
+            # signalled by close() sending _PULL_CLOSED, not by timeout.
+            if isinstance(input_q, RendezvousChannel):
+                prio_item = await input_q.get()
+            else:
+                try:
+                    # Unpack priority item
+                    # (priority, sequence, (payload, attempt))
+                    prio_item = await asyncio.wait_for(input_q.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
 
             # Pull stages receive _PULL_CLOSED when the pipeline is shutting down.
             # The sentinel was never counted as an unfinished task, so we must not

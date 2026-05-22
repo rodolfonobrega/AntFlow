@@ -6,6 +6,7 @@ import logging
 import pytest
 
 from antflow import Pipeline, Stage
+from antflow.pipeline import RendezvousChannel
 from antflow.exceptions import StageValidationError
 
 # ---------------------------------------------------------------------------
@@ -212,3 +213,63 @@ async def test_stream_buffer_size_limits_queue():
         collected.append(result.value)
 
     assert len(collected) == 8
+
+
+# ---------------------------------------------------------------------------
+# RendezvousChannel demand-queue poisoning with many workers (pull stage)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pull_stage_many_workers_no_livelock():
+    """
+    Regression: _stage_worker used wait_for(input_q.get(), timeout=0.1) for
+    RendezvousChannels.  With many workers each timeout left a cancelled future
+    in the demand queue; put() had to drain all of them to find a valid one,
+    causing a livelock under high worker counts.
+
+    Fix: pull stages call await input_q.get() directly; close() sends
+    _PULL_CLOSED to unblock workers on shutdown.
+    """
+    async def noop(x):
+        return x
+
+    n_items = 20
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=2, tasks=[noop]),
+        Stage("poll", workers=100, tasks=[noop], pull=True),
+    ])
+
+    # Must complete well within 10 seconds — a livelock would hang here.
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(n_items))),
+        timeout=10.0,
+    )
+    assert len(results) == n_items
+
+
+@pytest.mark.asyncio
+async def test_pull_stage_workers_unblock_on_shutdown():
+    """
+    Regression: join() did not call close() on RendezvousChannels after
+    setting _stop_event.  Workers blocked in get() would hang forever since
+    no more items arrived and there was no timeout to escape.
+
+    Fix: join() calls q.close() on every RendezvousChannel after draining.
+    """
+    async def noop(x):
+        return x
+
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=2, tasks=[noop]),
+        Stage("poll", workers=50, tasks=[noop], pull=True),
+    ])
+
+    # Verify RendezvousChannel is used for the pull stage
+    assert isinstance(pipeline._queues[1], RendezvousChannel)
+
+    # Must complete — before the fix this would hang indefinitely.
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(10))),
+        timeout=10.0,
+    )
+    assert len(results) == 10
