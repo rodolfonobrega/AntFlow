@@ -200,6 +200,26 @@ Worker 500:[WAIT][call✓][sleep 30s......]...
 
 All 500 workers are alive. Only 5 make API calls at any instant. Workers sleeping are not blocking anyone.
 
+### Why not just use `task_concurrency_limits={"poll_until_done": 5}` instead?
+
+Because they answer completely different questions:
+
+```python
+# task_concurrency_limits: "how many workers can be INSIDE this function?"
+# → while a worker is sleeping inside poll_until_done, the slot is held.
+# → at most 5 workers are ever executing the function simultaneously.
+# → the other 495 wait outside, blocked at the gate.
+# → equivalent to workers=5.
+
+# call_concurrency: "how many workers can be making the API call RIGHT NOW?"
+# → all 500 workers are inside poll_until_done simultaneously.
+# → while sleeping, a worker holds NO slot — others can call freely.
+# → only 5 slots are held at the exact moment of the API call.
+# → truly 500 jobs in flight, with a 5-call API cap.
+```
+
+With `task_concurrency_limits`, the slot is held through the sleep. With `call_concurrency`, the slot is released before the sleep. That one distinction is the entire difference.
+
 ---
 
 ## `call_rate` — throughput cap (calls per minute)
