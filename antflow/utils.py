@@ -15,7 +15,8 @@ def extract_exception(error: Exception) -> Exception:
     """
     if isinstance(error, RetryError):
         try:
-            return error.last_attempt.exception()
+            original = error.last_attempt.exception()
+            return original if isinstance(original, Exception) else error
         except Exception:
             return error
     return error

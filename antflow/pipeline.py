@@ -40,7 +40,9 @@ from .types import (
     PipelineResult,
     PipelineStats,
     StageStats,
+    StatusType,
     TaskEvent,
+    TaskEventType,
     TaskFunc,
     WorkerMetrics,
     WorkerState,
@@ -50,6 +52,23 @@ from .utils import extract_exception, setup_logger
 logger = setup_logger(__name__)
 
 _PULL_CLOSED = object()  # sentinel that tells a pull worker to stop
+
+
+@dataclass
+class _StageWorkerItem:
+    priority: int
+    sequence: int
+    payload: Dict[str, Any]
+    attempt: int
+    item_id: Any
+    start_time: float
+
+
+@dataclass
+class _StageWorkerTokens:
+    worker: Any
+    call_semaphore: Any
+    call_limiter: Any
 
 
 class RendezvousChannel:
@@ -1216,7 +1235,7 @@ class Pipeline:
         """Context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
         """Context manager exit with automatic shutdown."""
         await self.shutdown()
 
@@ -1224,7 +1243,7 @@ class Pipeline:
         self,
         item_id: Any,
         stage: str | None,
-        status: str,
+        status: StatusType,
         worker: str | None = None,
         metadata: Dict[str, Any] | None = None,
     ) -> None:
@@ -1255,7 +1274,7 @@ class Pipeline:
         stage: str,
         task_name: str,
         worker: str,
-        event_type: str,
+        event_type: TaskEventType,
         attempt: int,
         error: Optional[Exception] = None,
         duration: Optional[float] = None,
@@ -1306,179 +1325,261 @@ class Pipeline:
             output_q: Output queue (None for final stage)
         """
         while not self._stop_event.is_set() or (not self._shutdown and not input_q.empty()):
-            # Pull stages use a RendezvousChannel: call get() directly so we
-            # never put cancelled futures into the demand queue.  Shutdown is
-            # signalled by close() sending _PULL_CLOSED, not by timeout.
-            if isinstance(input_q, RendezvousChannel):
-                prio_item = await input_q.get()
-            else:
-                try:
-                    # Unpack priority item
-                    # (priority, sequence, (payload, attempt))
-                    prio_item = await asyncio.wait_for(input_q.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-
-            # Pull stages receive _PULL_CLOSED when the pipeline is shutting down.
-            # The sentinel was never counted as an unfinished task, so we must not
-            # call task_done() for it (that would underflow the channel counter).
+            prio_item = await self._read_stage_worker_item(input_q)
+            if prio_item is None:
+                continue
             if prio_item is _PULL_CLOSED:
                 return
 
-            priority, seq_in, (payload, attempt) = prio_item
-
-            item_id = payload.get("id")
-            start_time = time.time()
-
-            self._worker_states[name].status = "busy"
-            self._worker_states[name].current_item_id = item_id
-            self._worker_states[name].processing_since = start_time
-
-            # Set context variables for task status updates and call_concurrency/call_rate
-            token = worker_state_var.set(self._worker_states[name])
-            call_sem = self._call_semaphores.get(stage.name)
-            call_sem_token = _call_semaphore_var.set(call_sem)
-            call_limiter = self._call_limiters.get(stage.name)
-            call_limiter_token = _call_limiter_var.set(call_limiter)
-            # Reset the rate-limit clock so the first set_task_status() of each
-            # item is never suppressed by the previous item handled by this worker.
-            _last_update_time.set(0.0)
+            item = self._create_stage_worker_item(prio_item)
+            tokens = self._enter_stage_worker_context(name, stage, item)
 
             try:
-                logger.debug(
-                    f"[{name}] START stage={stage.name} id={item_id}"
-                    f" attempt={attempt} prio={priority}"
-                )
-
-                # SKIP Logic
-                should_skip = False
-                if stage.skip_if:
-                    try:
-                        should_skip = stage.skip_if(payload["value"])
-                    except Exception as e:
-                        logger.warning(f"[{name}] Error in skip_if predicate for id={item_id}: {e}")
-                        should_skip = False
-
-                if should_skip:
-                    logger.info(f"[{name}] SKIP stage={stage.name} id={item_id}")
-                    await self._emit_status(item_id, stage.name, "skipped", worker=name)
-                    if stage.on_skip:
-                        try:
-                            if asyncio.iscoroutinefunction(stage.on_skip):
-                                await stage.on_skip(item_id, payload["value"], payload)
-                            else:
-                                stage.on_skip(item_id, payload["value"], payload)
-                        except Exception as e:
-                            logger.error(f"[{name}] Error in on_skip callback: {e}")
-                    # Pass-through value
-                    result_value = payload["value"]
-                else:
-                    await self._emit_status(item_id, stage.name, "in_progress", worker=name)
-
-                    if stage.retry == "per_task":
-                        result_value = await self._run_per_task(
-                            stage, payload["value"], name, item_id
-                        )
-                    else:
-                        stage_completed, result_value = await self._run_per_stage(
-                            stage,
-                            payload["value"],
-                            name,
-                            item_id,
-                            payload,
-                            attempt,
-                            stage_index,
-                            priority,
-                        )
-                        if not stage_completed:
-                            continue
-
-                payload["value"] = result_value
-
-                # Emit completed if not skipped? Or is skipped enough?
-                # "skipped" is the final status for this stage.
-                # But to trigger "queued" for next stage, we just proceed.
-                if not should_skip:
-                    await self._emit_status(item_id, stage.name, "completed", worker=name)
-
-                if output_q is not None:
-                    # Propagate priority, use new sequence number for stability in next queue
-                    seq_out = next(self._msg_counter)
-                    await output_q.put((priority, seq_out, (payload, 1)))
-
-                    is_not_last_stage = stage_index + 1 < len(self.stages)
-                    next_stage_name = (
-                        self.stages[stage_index + 1].name if is_not_last_stage else None
-                    )
-                    if next_stage_name:
-                        await self._emit_status(item_id, next_stage_name, "queued")
-                else:
-                    if self.collect_results or hasattr(self, "_stream_queue"):
-                        # Extract known fields
-                        res_id = payload["id"]
-                        res_value = payload["value"]
-                        seq_id = payload["_sequence_id"]
-                        # Everything else goes to metadata
-                        meta = {
-                            k: v
-                            for k, v in payload.items()
-                            if k not in ("id", "value", "_sequence_id")
-                        }
-
-                        await self._add_result(res_id, res_value, seq_id, meta)
-
-                if stage.on_success and not should_skip:
-                    try:
-                        if asyncio.iscoroutinefunction(stage.on_success):
-                            await stage.on_success(item_id, payload["value"], payload)
-                        else:
-                            stage.on_success(item_id, payload["value"], payload)
-                    except Exception as e:
-                        logger.error(f"[{name}] Error in on_success callback: {e}")
-
-                if output_q is None:
-                    self._items_processed += 1
-
-                logger.debug(f"[{name}] END stage={stage.name} id={item_id}")
-
-                processing_time = time.time() - start_time
-                self._worker_metrics[name].items_processed += 1
-                self._worker_metrics[name].total_processing_time += processing_time
-                self._worker_metrics[name].last_active = time.time()
-
+                if await self._process_stage_worker_item(
+                    name, stage_index, stage, output_q, item
+                ):
+                    self._record_stage_worker_success(name, output_q is None, stage, item)
             except Exception as e:
-                original_error = extract_exception(e)
-                logger.error(
-                    f"[{name}] FAIL stage={stage.name} id={item_id} error={original_error}"
-                )
-                self._items_failed += 1
-
-                processing_time = time.time() - start_time
-                self._worker_metrics[name].items_failed += 1
-                self._worker_metrics[name].total_processing_time += processing_time
-                self._worker_metrics[name].last_active = time.time()
-
-                await self._emit_status(
-                    item_id, stage.name, "failed", metadata={"error": str(original_error)}
-                )
-
-                if stage.on_failure:
-                    try:
-                        if asyncio.iscoroutinefunction(stage.on_failure):
-                            await stage.on_failure(item_id, original_error, payload)
-                        else:
-                            stage.on_failure(item_id, original_error, payload)
-                    except Exception as e:
-                        logger.error(f"[{name}] Error in on_failure callback: {e}")
+                await self._handle_stage_worker_failure(name, stage, item, e)
             finally:
-                _call_limiter_var.reset(call_limiter_token)
-                _call_semaphore_var.reset(call_sem_token)
-                worker_state_var.reset(token)
-                self._worker_states[name].status = "idle"
-                self._worker_states[name].current_item_id = None
-                self._worker_states[name].current_task = None
-                self._worker_states[name].processing_since = None
+                self._exit_stage_worker_context(name, tokens)
                 input_q.task_done()
+
+    async def _read_stage_worker_item(self, input_q: asyncio.Queue) -> Any:
+        # Pull stages use a RendezvousChannel: call get() directly so cancelled
+        # futures are not left in the demand queue.
+        if isinstance(input_q, RendezvousChannel):
+            return await input_q.get()
+
+        try:
+            return await asyncio.wait_for(input_q.get(), timeout=0.1)
+        except asyncio.TimeoutError:
+            return None
+
+    def _create_stage_worker_item(self, prio_item: Any) -> _StageWorkerItem:
+        priority, sequence, (payload, attempt) = prio_item
+        return _StageWorkerItem(
+            priority=priority,
+            sequence=sequence,
+            payload=payload,
+            attempt=attempt,
+            item_id=payload.get("id"),
+            start_time=time.time(),
+        )
+
+    def _enter_stage_worker_context(
+        self, name: str, stage: Stage, item: _StageWorkerItem
+    ) -> _StageWorkerTokens:
+        worker_state = self._worker_states[name]
+        worker_state.status = "busy"
+        worker_state.current_item_id = item.item_id
+        worker_state.processing_since = item.start_time
+
+        token = worker_state_var.set(worker_state)
+        call_sem_token = _call_semaphore_var.set(self._call_semaphores.get(stage.name))
+        call_limiter_token = _call_limiter_var.set(self._call_limiters.get(stage.name))
+        # Reset the rate-limit clock so the first set_task_status() of each item
+        # is never suppressed by the previous item handled by this worker.
+        _last_update_time.set(0.0)
+        return _StageWorkerTokens(token, call_sem_token, call_limiter_token)
+
+    def _exit_stage_worker_context(self, name: str, tokens: _StageWorkerTokens) -> None:
+        _call_limiter_var.reset(tokens.call_limiter)
+        _call_semaphore_var.reset(tokens.call_semaphore)
+        worker_state_var.reset(tokens.worker)
+
+        worker_state = self._worker_states[name]
+        worker_state.status = "idle"
+        worker_state.current_item_id = None
+        worker_state.current_task = None
+        worker_state.processing_since = None
+
+    async def _process_stage_worker_item(
+        self,
+        name: str,
+        stage_index: int,
+        stage: Stage,
+        output_q: Optional[asyncio.Queue],
+        item: _StageWorkerItem,
+    ) -> bool:
+        logger.debug(
+            f"[{name}] START stage={stage.name} id={item.item_id}"
+            f" attempt={item.attempt} prio={item.priority}"
+        )
+
+        should_skip, completed, result_value = await self._run_or_skip_stage_item(
+            name, stage_index, stage, item
+        )
+        if not completed:
+            return False
+
+        item.payload["value"] = result_value
+        await self._complete_stage_worker_item(
+            name, stage_index, stage, output_q, item, should_skip
+        )
+        return True
+
+    async def _run_or_skip_stage_item(
+        self, name: str, stage_index: int, stage: Stage, item: _StageWorkerItem
+    ) -> tuple[bool, bool, Any]:
+        if await self._should_skip_stage_item(name, stage, item):
+            await self._handle_stage_skip(name, stage, item)
+            return True, True, item.payload["value"]
+
+        await self._emit_status(item.item_id, stage.name, "in_progress", worker=name)
+        completed, result_value = await self._run_stage_tasks(name, stage_index, stage, item)
+        return False, completed, result_value
+
+    async def _should_skip_stage_item(
+        self, name: str, stage: Stage, item: _StageWorkerItem
+    ) -> bool:
+        if not stage.skip_if:
+            return False
+
+        try:
+            return stage.skip_if(item.payload["value"])
+        except Exception as e:
+            logger.warning(
+                f"[{name}] Error in skip_if predicate for id={item.item_id}: {e}"
+            )
+            return False
+
+    async def _handle_stage_skip(
+        self, name: str, stage: Stage, item: _StageWorkerItem
+    ) -> None:
+        logger.info(f"[{name}] SKIP stage={stage.name} id={item.item_id}")
+        await self._emit_status(item.item_id, stage.name, "skipped", worker=name)
+        await self._run_stage_callback(stage.on_skip, name, "on_skip", item, item.payload["value"])
+
+    async def _run_stage_tasks(
+        self, name: str, stage_index: int, stage: Stage, item: _StageWorkerItem
+    ) -> tuple[bool, Any]:
+        if stage.retry == "per_task":
+            return True, await self._run_per_task(
+                stage, item.payload["value"], name, item.item_id
+            )
+
+        stage_completed, result_value = await self._run_per_stage(
+            stage,
+            item.payload["value"],
+            name,
+            item.item_id,
+            item.payload,
+            item.attempt,
+            stage_index,
+            item.priority,
+        )
+        return stage_completed, result_value
+
+    async def _complete_stage_worker_item(
+        self,
+        name: str,
+        stage_index: int,
+        stage: Stage,
+        output_q: Optional[asyncio.Queue],
+        item: _StageWorkerItem,
+        should_skip: bool,
+    ) -> None:
+        if not should_skip:
+            await self._emit_status(item.item_id, stage.name, "completed", worker=name)
+
+        if output_q is not None:
+            await self._send_stage_item_to_next_stage(stage_index, output_q, item)
+        elif self.collect_results or hasattr(self, "_stream_queue"):
+            await self._collect_stage_worker_result(item)
+
+        if not should_skip:
+            await self._run_stage_callback(
+                stage.on_success, name, "on_success", item, item.payload["value"]
+            )
+
+    async def _send_stage_item_to_next_stage(
+        self, stage_index: int, output_q: asyncio.Queue, item: _StageWorkerItem
+    ) -> None:
+        seq_out = next(self._msg_counter)
+        await output_q.put((item.priority, seq_out, (item.payload, 1)))
+
+        is_not_last_stage = stage_index + 1 < len(self.stages)
+        next_stage_name = self.stages[stage_index + 1].name if is_not_last_stage else None
+        if next_stage_name:
+            await self._emit_status(item.item_id, next_stage_name, "queued")
+
+    async def _collect_stage_worker_result(self, item: _StageWorkerItem) -> None:
+        meta = {
+            k: v
+            for k, v in item.payload.items()
+            if k not in ("id", "value", "_sequence_id")
+        }
+        await self._add_result(
+            item.payload["id"], item.payload["value"], item.payload["_sequence_id"], meta
+        )
+
+    async def _run_stage_callback(
+        self,
+        callback: Optional[Callable[[Any, Any, Dict[str, Any]], Any]],
+        name: str,
+        callback_name: str,
+        item: _StageWorkerItem,
+        value: Any,
+    ) -> None:
+        if not callback:
+            return
+
+        try:
+            if asyncio.iscoroutinefunction(callback):
+                await callback(item.item_id, value, item.payload)
+            else:
+                callback(item.item_id, value, item.payload)
+        except Exception as e:
+            logger.error(f"[{name}] Error in {callback_name} callback: {e}")
+
+    def _record_stage_worker_success(
+        self, name: str, is_final_stage: bool, stage: Stage, item: _StageWorkerItem
+    ) -> None:
+        if is_final_stage:
+            self._items_processed += 1
+
+        logger.debug(f"[{name}] END stage={stage.name} id={item.item_id}")
+        self._record_worker_metric(name, item, failed=False)
+
+    async def _handle_stage_worker_failure(
+        self, name: str, stage: Stage, item: _StageWorkerItem, error: Exception
+    ) -> None:
+        original_error = extract_exception(error)
+        logger.error(f"[{name}] FAIL stage={stage.name} id={item.item_id} error={original_error}")
+        self._items_failed += 1
+        self._record_worker_metric(name, item, failed=True)
+
+        await self._emit_status(
+            item.item_id, stage.name, "failed", metadata={"error": str(original_error)}
+        )
+        await self._run_stage_failure_callback(name, stage, item, original_error)
+
+    async def _run_stage_failure_callback(
+        self, name: str, stage: Stage, item: _StageWorkerItem, error: Exception
+    ) -> None:
+        if not stage.on_failure:
+            return
+
+        try:
+            if asyncio.iscoroutinefunction(stage.on_failure):
+                await stage.on_failure(item.item_id, error, item.payload)
+            else:
+                stage.on_failure(item.item_id, error, item.payload)
+        except Exception as e:
+            logger.error(f"[{name}] Error in on_failure callback: {e}")
+
+    def _record_worker_metric(
+        self, name: str, item: _StageWorkerItem, failed: bool
+    ) -> None:
+        processing_time = time.time() - item.start_time
+        metrics = self._worker_metrics[name]
+        if failed:
+            metrics.items_failed += 1
+        else:
+            metrics.items_processed += 1
+        metrics.total_processing_time += processing_time
+        metrics.last_active = time.time()
 
     async def _run_per_task(
         self,

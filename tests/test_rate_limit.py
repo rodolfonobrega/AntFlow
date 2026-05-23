@@ -216,8 +216,8 @@ async def test_task_vs_call_concurrency_behavior():
       - Peak workers inside function >> 3 (most of the 20 run concurrently).
       - Peak workers in API call == 3.
     """
-    N_ITEMS = 20
-    LIMIT = 3
+    n_items = 20
+    limit = 3
 
     # --- task_concurrency_limits ---
     inside_fn_a = 0
@@ -236,12 +236,12 @@ async def test_task_vs_call_concurrency_behavior():
     pipeline_a = Pipeline(stages=[
         Stage(
             "s",
-            workers=N_ITEMS,
+            workers=n_items,
             tasks=[poll_with_task_limit],
-            task_concurrency_limits={"poll_with_task_limit": LIMIT},
+            task_concurrency_limits={"poll_with_task_limit": limit},
         )
     ])
-    results_a = await pipeline_a.run(list(range(N_ITEMS)))
+    results_a = await pipeline_a.run(list(range(n_items)))
 
     # --- call_concurrency ---
     inside_fn_b = 0
@@ -274,30 +274,30 @@ async def test_task_vs_call_concurrency_behavior():
     pipeline_b = Pipeline(stages=[
         Stage(
             "s",
-            workers=N_ITEMS,
+            workers=n_items,
             tasks=[poll_with_call_concurrency],
-            call_concurrency=LIMIT,
+            call_concurrency=limit,
         )
     ])
-    results_b = await pipeline_b.run(list(range(N_ITEMS)))
+    results_b = await pipeline_b.run(list(range(n_items)))
 
     # Both process all items
-    assert len(results_a) == N_ITEMS
-    assert len(results_b) == N_ITEMS
+    assert len(results_a) == n_items
+    assert len(results_b) == n_items
 
     # task_concurrency_limits: at most LIMIT workers inside the function at any time
     # (including during sleep — the slot is never released until the function returns)
-    assert peak_fn_a <= LIMIT, (
-        f"task_concurrency_limits: expected peak_fn <= {LIMIT}, got {peak_fn_a}"
+    assert peak_fn_a <= limit, (
+        f"task_concurrency_limits: expected peak_fn <= {limit}, got {peak_fn_a}"
     )
 
     # call_concurrency: workers enter the function freely — peak >> LIMIT
-    assert peak_fn_b > LIMIT, (
-        f"call_concurrency: expected peak_fn > {LIMIT} (workers run concurrently), got {peak_fn_b}"
+    assert peak_fn_b > limit, (
+        f"call_concurrency: expected peak_fn > {limit} (workers run concurrently), got {peak_fn_b}"
     )
     # ...but API calls are still limited
-    assert peak_api_b <= LIMIT, (
-        f"call_concurrency: expected peak_api <= {LIMIT}, got {peak_api_b}"
+    assert peak_api_b <= limit, (
+        f"call_concurrency: expected peak_api <= {limit}, got {peak_api_b}"
     )
 
 

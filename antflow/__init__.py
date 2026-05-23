@@ -5,6 +5,7 @@ AntFlow: Async execution library with concurrent.futures-style API and advanced 
 # Auto-activate the fastest available event loop for this platform.
 # uvloop on Linux/macOS, winloop on Windows — transparent to the user.
 import sys as _sys
+from importlib import import_module as _import_module
 
 from ._version import __version__
 
@@ -19,10 +20,9 @@ try:
     except RuntimeError:
         _loop_running = False
     if not _loop_running:
-        if _sys.platform in ("win32", "cygwin", "cli"):
-            import winloop as _fast_loop
-        else:
-            import uvloop as _fast_loop
+        _fast_loop = _import_module(
+            "winloop" if _sys.platform in ("win32", "cygwin", "cli") else "uvloop"
+        )
         _fast_loop.install()
         del _fast_loop
     del _asyncio, _loop_running
@@ -31,6 +31,7 @@ except Exception:
     # unsupported arch, install() failure, etc.).
     pass
 del _sys
+del _import_module
 from .context import call_rate_has_capacity, concurrency_limit, rate_limit, set_task_status  # noqa: E402, I001
 from .exceptions import (  # noqa: E402
     AntFlowError,

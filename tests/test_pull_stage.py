@@ -221,23 +221,23 @@ async def test_pull_stage_call_concurrency_under_load():
     async def identity(x):
         return x
 
-    N_ITEMS = 40
-    LIMIT = 5
+    n_items = 40
+    limit = 5
 
     pipeline = Pipeline(stages=[
         Stage("feeder", workers=4, tasks=[identity]),
-        Stage("poll", workers=30, tasks=[poll_job], pull=True, call_concurrency=LIMIT),
+        Stage("poll", workers=30, tasks=[poll_job], pull=True, call_concurrency=limit),
     ])
     results = await asyncio.wait_for(
-        pipeline.run(list(range(N_ITEMS))),
+        pipeline.run(list(range(n_items))),
         timeout=30.0,
     )
 
-    assert len(results) == N_ITEMS
+    assert len(results) == n_items
     # Semaphore held — API calls never exceeded limit
-    assert peak_api <= LIMIT
+    assert peak_api <= limit
     # Workers ran concurrently — peak inside function well above limit
-    assert peak_fn > LIMIT
+    assert peak_fn > limit
 
 
 # ---------------------------------------------------------------------------
@@ -254,20 +254,20 @@ async def test_pull_stage_stress_no_items_lost():
         await asyncio.sleep(0)  # yield to stress the scheduler
         return x
 
-    N = 500
+    n = 500
     pipeline = Pipeline(stages=[
         Stage("feeder", workers=10, tasks=[identity]),
         Stage("poll", workers=100, tasks=[work], pull=True),
     ])
     results = await asyncio.wait_for(
-        pipeline.run(list(range(N))),
+        pipeline.run(list(range(n))),
         timeout=30.0,
     )
 
-    assert len(results) == N
+    assert len(results) == n
     # No duplicates
     values = [r.value for r in results]
-    assert len(set(values)) == N
+    assert len(set(values)) == n
 
 
 # ---------------------------------------------------------------------------

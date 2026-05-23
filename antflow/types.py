@@ -17,7 +17,7 @@ from typing import (
 if TYPE_CHECKING:
     from .pipeline import Pipeline
 
-TaskFunc = Callable[[Any], Awaitable[Any]]
+TaskFunc = Callable[..., Awaitable[Any]]
 StatusType = Literal["queued", "in_progress", "completed", "failed", "retrying", "skipped"]
 WorkerStatus = Literal["idle", "busy"]
 TaskEventType = Literal["start", "complete", "retry", "fail"]

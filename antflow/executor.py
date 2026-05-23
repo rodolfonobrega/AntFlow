@@ -2,7 +2,20 @@ from __future__ import annotations
 
 import asyncio
 from enum import Enum
-from typing import Any, AsyncIterator, Callable, Iterable, List, Set, Tuple, TypeVar
+from types import TracebackType
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generic,
+    Iterable,
+    List,
+    Set,
+    Tuple,
+    TypeVar,
+    cast,
+)
 
 from .exceptions import ExecutorShutdownError
 from .utils import setup_logger
@@ -21,7 +34,7 @@ class WaitStrategy(Enum):
     ALL_COMPLETED = "ALL_COMPLETED"
 
 
-class AsyncFuture:
+class AsyncFuture(Generic[R]):
     """
     An async-compatible future that holds the result of an async task.
     Similar to concurrent.futures.Future but for asyncio.
@@ -33,7 +46,7 @@ class AsyncFuture:
         self._exception: Exception | None = None
         self._done_event = asyncio.Event()
 
-    def set_result(self, result: Any) -> None:
+    def set_result(self, result: R) -> None:
         """Set the result and mark the future as done."""
         self._result = result
         self._done_event.set()
@@ -43,7 +56,7 @@ class AsyncFuture:
         self._exception = exception
         self._done_event.set()
 
-    async def result(self, timeout: float | None = None) -> Any:
+    async def result(self, timeout: float | None = None) -> R:
         """
         Wait for and return the result.
 
@@ -64,7 +77,7 @@ class AsyncFuture:
 
         if self._exception is not None:
             raise self._exception
-        return self._result
+        return cast(R, self._result)
 
     def done(self) -> bool:
         """Return True if the future is done."""
@@ -139,13 +152,13 @@ class AsyncExecutor:
 
     def submit(
         self,
-        fn: Callable[..., Any],
+        fn: Callable[..., Awaitable[R]],
         *args: Any,
         retries: int = 0,
         retry_delay: float = 0.1,
         semaphore: asyncio.Semaphore | None = None,
         **kwargs: Any,
-    ) -> AsyncFuture:
+    ) -> AsyncFuture[R]:
         """
         Submit a task for execution.
 
@@ -189,7 +202,7 @@ class AsyncExecutor:
         else:
             task_fn = fn
 
-        future = AsyncFuture(self._sequence_counter)
+        future: AsyncFuture[R] = AsyncFuture(self._sequence_counter)
         self._sequence_counter += 1
         self._queue.put_nowait((future, task_fn, args, kwargs))
 
@@ -197,7 +210,7 @@ class AsyncExecutor:
 
     async def map(
         self,
-        fn: Callable[[T], Any],
+        fn: Callable[..., Awaitable[R]],
         *iterables: Iterable[T],
         timeout: float | None = None,
         retries: int = 0,
@@ -242,7 +255,7 @@ class AsyncExecutor:
 
     async def map_iter(
         self,
-        fn: Callable[[T], Any],
+        fn: Callable[..., Awaitable[R]],
         *iterables: Iterable[T],
         timeout: float | None = None,
         retries: int = 0,
@@ -283,7 +296,7 @@ class AsyncExecutor:
 
         await self._ensure_workers_started()
 
-        futures = []
+        futures: list[AsyncFuture[R]] = []
         for args in zip(*iterables):
             if len(args) == 1:
                 future = self.submit(
@@ -305,8 +318,8 @@ class AsyncExecutor:
             yield await future.result(timeout=timeout)
 
     async def as_completed(
-        self, futures: list[AsyncFuture], timeout: float | None = None
-    ) -> AsyncIterator[AsyncFuture]:
+        self, futures: list[AsyncFuture[R]], timeout: float | None = None
+    ) -> AsyncIterator[AsyncFuture[R]]:
         """
         Yield futures as they complete.
 
@@ -338,6 +351,60 @@ class AsyncExecutor:
         finally:
             for task in waiters:
                 task.cancel()
+
+    async def _wait_for_future_event(self, future: AsyncFuture[R]) -> AsyncFuture[R]:
+        await future._done_event.wait()
+        return future
+
+    def _wait_start_time(self, timeout: float | None) -> float | None:
+        return asyncio.get_event_loop().time() if timeout is not None else None
+
+    def _remaining_wait_timeout(
+        self, timeout: float | None, start_time: float | None
+    ) -> float | None:
+        if timeout is None or start_time is None:
+            return None
+
+        elapsed = asyncio.get_event_loop().time() - start_time
+        return max(0, timeout - elapsed)
+
+    def _create_wait_tasks(
+        self, pending: Set[AsyncFuture[R]]
+    ) -> dict[asyncio.Task[AsyncFuture[R]], AsyncFuture[R]]:
+        return {asyncio.create_task(self._wait_for_future_event(f)): f for f in pending}
+
+    def _cancel_wait_tasks(
+        self, wait_tasks: dict[asyncio.Task[AsyncFuture[R]], AsyncFuture[R]]
+    ) -> None:
+        for task in wait_tasks:
+            if not task.done():
+                task.cancel()
+
+    def _process_completed_wait_tasks(
+        self,
+        completed_tasks: Set[asyncio.Task[AsyncFuture[R]]],
+        wait_tasks: dict[asyncio.Task[AsyncFuture[R]], AsyncFuture[R]],
+        done: Set[AsyncFuture[R]],
+        pending: Set[AsyncFuture[R]],
+    ) -> Set[AsyncFuture[R]]:
+        completed_futures: Set[AsyncFuture[R]] = set()
+        for task in completed_tasks:
+            future = wait_tasks[task]
+            pending.discard(future)
+            done.add(future)
+            completed_futures.add(future)
+        return completed_futures
+
+    def _wait_strategy_satisfied(
+        self, return_when: WaitStrategy, completed_futures: Set[AsyncFuture[R]]
+    ) -> bool:
+        if return_when == WaitStrategy.FIRST_COMPLETED:
+            return bool(completed_futures)
+
+        if return_when == WaitStrategy.FIRST_EXCEPTION:
+            return any(future.exception() is not None for future in completed_futures)
+
+        return False
 
     async def wait(
         self,
@@ -380,25 +447,16 @@ class AsyncExecutor:
         if not pending:
             return done, pending
 
-        start_time = asyncio.get_event_loop().time() if timeout else None
-
-        async def wait_for_event(future: AsyncFuture[R]) -> AsyncFuture[R]:
-            await future._done_event.wait()
-            return future
+        start_time = self._wait_start_time(timeout)
 
         while pending:
-            # Calculate remaining timeout
-            remaining_timeout = None
-            if timeout is not None and start_time is not None:
-                elapsed = asyncio.get_event_loop().time() - start_time
-                remaining_timeout = max(0, timeout - elapsed)
-                if remaining_timeout <= 0:
-                    if return_when == WaitStrategy.ALL_COMPLETED:
-                        raise asyncio.TimeoutError()
-                    break
+            remaining_timeout = self._remaining_wait_timeout(timeout, start_time)
+            if remaining_timeout is not None and remaining_timeout <= 0:
+                if return_when == WaitStrategy.ALL_COMPLETED:
+                    raise asyncio.TimeoutError()
+                break
 
-            # Create wait tasks for pending futures
-            wait_tasks = {asyncio.create_task(wait_for_event(f)): f for f in pending}
+            wait_tasks = self._create_wait_tasks(pending)
 
             try:
                 completed_tasks, _ = await asyncio.wait(
@@ -407,40 +465,18 @@ class AsyncExecutor:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
-                # Process completed futures
-                for task in completed_tasks:
-                    future = wait_tasks[task]
-                    pending.discard(future)
-                    done.add(future)
+                if not completed_tasks:
+                    if return_when == WaitStrategy.ALL_COMPLETED:
+                        raise asyncio.TimeoutError()
+                    break
 
-                    # Check return strategy
-                    if return_when == WaitStrategy.FIRST_COMPLETED:
-                        # Cancel remaining tasks
-                        for t in wait_tasks.keys():
-                            if not t.done():
-                                t.cancel()
-                        return done, pending
-
-                    if return_when == WaitStrategy.FIRST_EXCEPTION:
-                        if future.exception() is not None:
-                            # Cancel remaining tasks
-                            for t in wait_tasks.keys():
-                                if not t.done():
-                                    t.cancel()
-                            return done, pending
-
-                # Cancel incomplete tasks
-                for task in wait_tasks.keys():
-                    if not task.done():
-                        task.cancel()
-
-            except asyncio.TimeoutError:
-                # Timeout occurred
-                for task in wait_tasks.keys():
-                    task.cancel()
-                if return_when == WaitStrategy.ALL_COMPLETED:
-                    raise
-                break
+                completed_futures = self._process_completed_wait_tasks(
+                    completed_tasks, wait_tasks, done, pending
+                )
+                if self._wait_strategy_satisfied(return_when, completed_futures):
+                    return done, pending
+            finally:
+                self._cancel_wait_tasks(wait_tasks)
 
         return done, pending
 
@@ -485,6 +521,11 @@ class AsyncExecutor:
         await self._ensure_workers_started()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: TracebackType | None,
+    ) -> None:
         """Context manager exit with automatic shutdown."""
         await self.shutdown(wait=True)
