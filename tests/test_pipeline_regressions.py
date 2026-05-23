@@ -6,8 +6,8 @@ import logging
 import pytest
 
 from antflow import Pipeline, Stage
-from antflow.pipeline import RendezvousChannel
 from antflow.exceptions import StageValidationError
+from antflow.pipeline import RendezvousChannel
 
 # ---------------------------------------------------------------------------
 # on_failure called in per_stage mode
@@ -141,6 +141,27 @@ async def test_per_stage_retry_no_deadlock():
         timeout=5.0,
     )
     assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_per_stage_retry_allows_none_result():
+    """A successful per_stage task may legitimately return None."""
+
+    async def returns_none(x):
+        return None
+
+    stage = Stage(
+        name="S",
+        workers=1,
+        tasks=[returns_none],
+        retry="per_stage",
+        stage_attempts=1,
+    )
+    results = await Pipeline(stages=[stage]).run([1])
+
+    assert len(results) == 1
+    assert results[0].is_success
+    assert results[0].value is None
 
 
 # ---------------------------------------------------------------------------

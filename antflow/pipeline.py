@@ -1380,7 +1380,7 @@ class Pipeline:
                             stage, payload["value"], name, item_id
                         )
                     else:
-                        result_value = await self._run_per_stage(
+                        stage_completed, result_value = await self._run_per_stage(
                             stage,
                             payload["value"],
                             name,
@@ -1390,7 +1390,7 @@ class Pipeline:
                             stage_index,
                             priority,
                         )
-                        if result_value is None:
+                        if not stage_completed:
                             continue
 
                 payload["value"] = result_value
@@ -1549,7 +1549,7 @@ class Pipeline:
         attempt: int,
         stage_index: int,
         priority: int,
-    ) -> Optional[Any]:
+    ) -> tuple[bool, Any]:
         """
         Execute stage tasks with per-stage retry strategy.
 
@@ -1564,7 +1564,9 @@ class Pipeline:
             priority: Priority level
 
         Returns:
-            Final value if successful, None if retried or failed
+            Tuple of (completed, value). completed=False means the item was
+            re-queued for retry or failed permanently; value is only meaningful
+            when completed=True.
         """
         current = value
         _current_task_name = stage.tasks[0].__name__ if stage.tasks else "unknown"
@@ -1615,7 +1617,7 @@ class Pipeline:
                     f"={task_name} id={item_id}"
                 )
 
-            return current
+            return True, current
 
         except Exception as e:
             original_error = extract_exception(e)
@@ -1643,7 +1645,7 @@ class Pipeline:
                     metadata={"attempt": attempt + 1, "retry": True, "error": str(original_error)},
                 )
 
-                return None
+                return False, None
             else:
                 logger.error(
                     f"[{worker_name}] FAIL stage={stage.name} id={item_id} "
@@ -1665,7 +1667,7 @@ class Pipeline:
                     except Exception as cb_err:
                         logger.error(f"[{worker_name}] Error in on_failure callback: {cb_err}")
 
-                return None
+                return False, None
 
     def _wrap_with_tenacity(
         self,
