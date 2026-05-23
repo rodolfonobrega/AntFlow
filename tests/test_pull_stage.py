@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from antflow import Pipeline, Stage
+from antflow.context import concurrency_limit
 from antflow.exceptions import PipelineError, StageValidationError
 
 
@@ -121,3 +122,181 @@ def test_pull_with_per_stage_retry_raises():
 
     with pytest.raises(StageValidationError, match="per_stage"):
         Stage("S", workers=1, tasks=[noop], pull=True, retry="per_stage").validate()
+
+
+# ---------------------------------------------------------------------------
+# Pull stage + retries
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pull_stage_retry_on_failure():
+    """Items that fail in a pull stage are retried and eventually succeed."""
+    attempts: dict[int, int] = {}
+
+    async def flaky(x):
+        attempts[x] = attempts.get(x, 0) + 1
+        if attempts[x] < 2:
+            raise ValueError("transient")
+        return x * 10
+
+    async def identity(x):
+        return x
+
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=2, tasks=[identity]),
+        Stage("poll", workers=4, tasks=[flaky], pull=True, task_attempts=3),
+    ])
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(8))),
+        timeout=15.0,
+    )
+
+    assert len(results) == 8
+    assert sorted(r.value for r in results) == [i * 10 for i in range(8)]
+    # Every item needed exactly 2 attempts
+    assert all(v == 2 for v in attempts.values())
+
+
+@pytest.mark.asyncio
+async def test_pull_stage_all_retries_exhausted():
+    """Items that exhaust retries in a pull stage are recorded as failed."""
+    async def always_fail(x):
+        raise RuntimeError("permanent")
+
+    async def identity(x):
+        return x
+
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=2, tasks=[identity]),
+        Stage("poll", workers=4, tasks=[always_fail], pull=True, task_attempts=2),
+    ])
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(5))),
+        timeout=15.0,
+    )
+
+    # All failed — no successful results
+    assert len(results) == 0
+    stats = pipeline.get_stats()
+    assert stats.items_failed == 5
+
+
+# ---------------------------------------------------------------------------
+# Pull stage + call_concurrency under load
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pull_stage_call_concurrency_under_load():
+    """
+    pull=True + call_concurrency: all items processed, semaphore never exceeded,
+    workers run concurrently (not serialised by the semaphore).
+    """
+    active_api = 0
+    peak_api = 0
+    inside_fn = 0
+    peak_fn = 0
+
+    async def poll_job(x):
+        nonlocal inside_fn, peak_fn, active_api, peak_api
+        inside_fn += 1
+        peak_fn = max(peak_fn, inside_fn)
+
+        async with concurrency_limit():
+            active_api += 1
+            peak_api = max(peak_api, active_api)
+            await asyncio.sleep(0.02)
+            active_api -= 1
+
+        await asyncio.sleep(0.01)  # simulate inter-poll sleep (no slot held)
+
+        async with concurrency_limit():
+            active_api += 1
+            peak_api = max(peak_api, active_api)
+            await asyncio.sleep(0.02)
+            active_api -= 1
+
+        inside_fn -= 1
+        return x
+
+    async def identity(x):
+        return x
+
+    N_ITEMS = 40
+    LIMIT = 5
+
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=4, tasks=[identity]),
+        Stage("poll", workers=30, tasks=[poll_job], pull=True, call_concurrency=LIMIT),
+    ])
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(N_ITEMS))),
+        timeout=30.0,
+    )
+
+    assert len(results) == N_ITEMS
+    # Semaphore held — API calls never exceeded limit
+    assert peak_api <= LIMIT
+    # Workers ran concurrently — peak inside function well above limit
+    assert peak_fn > LIMIT
+
+
+# ---------------------------------------------------------------------------
+# Correctness stress test — no items lost or duplicated under high concurrency
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pull_stage_stress_no_items_lost():
+    """500 items through a pull stage with 100 workers — every item arrives exactly once."""
+    async def identity(x):
+        return x
+
+    async def work(x):
+        await asyncio.sleep(0)  # yield to stress the scheduler
+        return x
+
+    N = 500
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=10, tasks=[identity]),
+        Stage("poll", workers=100, tasks=[work], pull=True),
+    ])
+    results = await asyncio.wait_for(
+        pipeline.run(list(range(N))),
+        timeout=30.0,
+    )
+
+    assert len(results) == N
+    # No duplicates
+    values = [r.value for r in results]
+    assert len(set(values)) == N
+
+
+# ---------------------------------------------------------------------------
+# Shutdown under load
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pull_stage_shutdown_while_processing():
+    """shutdown() while workers are actively processing does not hang."""
+    processing = asyncio.Event()
+
+    async def identity(x):
+        return x
+
+    async def slow_work(x):
+        processing.set()
+        await asyncio.sleep(0.5)
+        return x
+
+    pipeline = Pipeline(stages=[
+        Stage("feeder", workers=2, tasks=[identity]),
+        Stage("poll", workers=10, tasks=[slow_work], pull=True),
+    ])
+
+    await pipeline.start()
+    await pipeline.feed(list(range(20)))
+
+    # Wait until at least one worker is actively processing
+    await asyncio.wait_for(processing.wait(), timeout=5.0)
+
+    # Shutdown must complete without hanging
+    await asyncio.wait_for(pipeline.shutdown(), timeout=10.0)
