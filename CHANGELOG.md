@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-05-23
+
+### Changed
+
+*   **Reduced pipeline worker complexity:** Refactored `Pipeline._stage_worker` into focused private helpers for queue reads, worker context handling, skip/callback flow, successful completion, result forwarding/collection, metrics, and failure handling. Public behavior is unchanged.
+*   **Simplified executor wait logic:** Refactored `AsyncExecutor.wait` into private helpers for timeout calculation, wait-task lifecycle, completed-future processing, and `FIRST_COMPLETED` / `FIRST_EXCEPTION` / `ALL_COMPLETED` strategy handling.
+*   **Improved typing for async task APIs:** Tightened executor and pipeline type hints, including generic `AsyncFuture[R]`, variadic async callables, status/event literal types, and context-manager exit annotations.
+
+### Fixed
+
+*   **RetryError extraction robustness:** `extract_exception()` now falls back to the original `RetryError` if tenacity's last attempt does not expose an `Exception` instance.
+*   **Fast event-loop import style:** Event-loop backend selection now uses dynamic import to keep platform-specific `uvloop` / `winloop` imports cleaner for static analysis.
+
 ## [0.8.2] - 2026-05-22
 
 ### Fixed
