@@ -142,7 +142,7 @@ class AsyncExecutor:
 
         logger.debug(f"Worker {worker_id} stopped")
 
-    async def _ensure_workers_started(self) -> None:
+    def _ensure_workers_started(self) -> None:
         """Start worker tasks if not already started."""
         if not self._workers_started:
             self._worker_tasks = [
@@ -201,6 +201,8 @@ class AsyncExecutor:
             task_fn = wrapped_fn
         else:
             task_fn = fn
+
+        self._ensure_workers_started()
 
         future: AsyncFuture[R] = AsyncFuture(self._sequence_counter)
         self._sequence_counter += 1
@@ -294,7 +296,7 @@ class AsyncExecutor:
         if self._shutdown:
             raise ExecutorShutdownError("Cannot use map on a shutdown executor")
 
-        await self._ensure_workers_started()
+        self._ensure_workers_started()
 
         futures: list[AsyncFuture[R]] = []
         for args in zip(*iterables):
@@ -518,7 +520,7 @@ class AsyncExecutor:
 
     async def __aenter__(self) -> "AsyncExecutor":
         """Context manager entry."""
-        await self._ensure_workers_started()
+        self._ensure_workers_started()
         return self
 
     async def __aexit__(

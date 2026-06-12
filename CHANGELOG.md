@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-06-12
+
+### Added
+
+*   **`install_fast_loop()`**: Expose an opt-in function to install the fastest available event loop policy (uses `winloop` on Windows and `uvloop` on Linux/macOS). Suppresses deprecation warnings on Python 3.12+.
+
+### Fixed
+
+*   **`stream()` hang on task failure**: If an item failed, `stream()` would wait forever for `total_items` results. It now yields a `PipelineResult` with `.error` set when a failure occurs.
+*   **Limited buffer `stream()` deadlock on early exit (`break`)**: Workers blocked on putting items to a full `_stream_queue` could deadlock on shutdown. We now use a non-blocking race against `_stop_event` to immediately abort `put` operations when the pipeline is shutting down.
+*   **`stream()` result leakage to `_results`**: Completed background items could leak into `_results` when the generator was abandoned. We now guard against this with an internal `_is_streaming` flag.
+*   **`stream(buffer_size=0)` true zero-buffer**: `buffer_size=0` previously created an unlimited queue in asyncio. It now creates a `RendezvousChannel` (true zero-buffer queue). Added `None` as default `buffer_size` to mean unlimited.
+*   **Inconsistent metrics with `retry="per_stage"`**: Permanent failures in `_run_per_stage` returned `False, None` silently, bypassing metric and status updates. We now propagate the exception, unifying the failure path with `_handle_stage_worker_failure`.
+*   **`AsyncExecutor.submit()` worker start trap**: Submitting tasks outside of `async with` context managers or `map()` calls would hang forever. Workers are now started automatically inside `submit()`.
+*   **`functools.partial` task crashes**: Direct access to `task.__name__` threw `AttributeError` for partial tasks. Added a `get_task_name` helper to dynamically extract the task name or fallback gracefully.
+*   **Global import side-effect**: `import antflow` no longer automatically alters the global event loop policy, avoiding unexpected behavior and deprecation warnings on Python 3.12+.
+*   **`StatusTracker` exact `error_type`**: `StatusTracker.get_failed_items()` now preserves the exact class name of exceptions by storing and checking `error_type` in the status event metadata.
+
 ## [0.8.3] - 2026-05-23
 
 ### Changed

@@ -171,12 +171,14 @@ class StatusTracker:
             attempts = sum(1 for e in history if e.status == "retrying") + 1
 
             error_str = str(event.metadata.get("error", "Unknown error"))
-            error_type = "Exception"
+            error_type = event.metadata.get("error_type")
 
-            if ":" in error_str:
-                parts = error_str.split(":", 1)
-                if parts[0].replace("_", "").replace(" ", "").isalpha():
-                    error_type = parts[0].strip()
+            if not error_type:
+                error_type = "Exception"
+                if ":" in error_str:
+                    parts = error_str.split(":", 1)
+                    if parts[0].replace("_", "").replace(" ", "").isalpha():
+                        error_type = parts[0].strip()
 
             failed_items.append(
                 FailedItem(

@@ -2,36 +2,25 @@
 AntFlow: Async execution library with concurrent.futures-style API and advanced pipelines.
 """
 
-# Auto-activate the fastest available event loop for this platform.
-# uvloop on Linux/macOS, winloop on Windows — transparent to the user.
-import sys as _sys
-from importlib import import_module as _import_module
-
 from ._version import __version__
 
-try:
-    # Don't override the policy if a loop is already running (e.g. Jupyter,
-    # IPython autoawait, or an embedding app) — install() wouldn't affect the
-    # running loop and switching policy underneath it is surprising.
-    import asyncio as _asyncio
+# Fast event loop policy helper
+def install_fast_loop() -> None:
+    """
+    Install the fastest available event loop policy for the current platform.
+    Uses winloop on Windows, and uvloop on Linux/macOS.
+    """
+    import sys
+    import asyncio
+    from importlib import import_module
     try:
-        _asyncio.get_running_loop()
-        _loop_running = True
-    except RuntimeError:
-        _loop_running = False
-    if not _loop_running:
-        _fast_loop = _import_module(
-            "winloop" if _sys.platform in ("win32", "cygwin", "cli") else "uvloop"
+        fast_loop = import_module(
+            "winloop" if sys.platform in ("win32", "cygwin", "cli") else "uvloop"
         )
-        _fast_loop.install()
-        del _fast_loop
-    del _asyncio, _loop_running
-except Exception:
-    # Never let an optional speedup break `import antflow` (missing wheel,
-    # unsupported arch, install() failure, etc.).
-    pass
-del _sys
-del _import_module
+        asyncio.set_event_loop_policy(fast_loop.EventLoopPolicy())
+    except Exception:
+        pass
+
 from .context import call_rate_has_capacity, concurrency_limit, rate_limit, set_task_status  # noqa: E402, I001
 from .exceptions import (  # noqa: E402
     AntFlowError,
@@ -91,4 +80,5 @@ __all__ = [
     "concurrency_limit",
     "rate_limit",
     "set_task_status",
+    "install_fast_loop",
 ]

@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from tenacity import RetryError
 
@@ -41,3 +42,15 @@ def setup_logger(name: str, level: int = logging.INFO) -> logging.Logger:
         logger.addHandler(handler)
         logger.setLevel(level)
     return logger
+
+
+def get_task_name(task: Any) -> str:
+    """
+    Get a friendly name for a task callable.
+    Handles standard functions, functools.partial, and custom callable objects.
+    """
+    if hasattr(task, "__name__"):
+        return task.__name__
+    if hasattr(task, "func") and hasattr(task.func, "__name__"):
+        return task.func.__name__
+    return type(task).__name__

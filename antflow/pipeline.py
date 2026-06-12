@@ -47,7 +47,7 @@ from .types import (
     WorkerMetrics,
     WorkerState,
 )
-from .utils import extract_exception, setup_logger
+from .utils import extract_exception, get_task_name, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -221,7 +221,7 @@ class Stage:
                 f"Stage '{self.name}' stage_attempts must be at least 1, got {self.stage_attempts}"
             )
         if self.task_concurrency_limits:
-            task_names = {getattr(t, "__name__", None) for t in self.tasks}
+            task_names = {get_task_name(t) for t in self.tasks}
             unknown = set(self.task_concurrency_limits) - task_names
             if unknown:
                 raise StageValidationError(
@@ -422,7 +422,7 @@ class Pipeline:
 
         stages = []
         for i, task in enumerate(task_list):
-            task_name = getattr(task, "__name__", f"Task{i}")
+            task_name = get_task_name(task)
             stage_name = task_name.replace("_", " ").title().replace(" ", "")
             stages.append(
                 Stage(
@@ -716,6 +716,7 @@ class Pipeline:
         res_value: Any,
         seq_id: int,
         metadata: Dict[str, Any],
+        error: Optional[Exception] = None,
     ) -> None:
         """
         Add a result to the appropriate storage.
@@ -728,11 +729,28 @@ class Pipeline:
             res_value: Result value
             seq_id: Sequence ID
             metadata: Additional metadata
+            error: Optional exception if processing failed
         """
-        result = PipelineResult(id=res_id, value=res_value, sequence_id=seq_id, metadata=metadata)
+        result = PipelineResult(
+            id=res_id, value=res_value, sequence_id=seq_id, metadata=metadata, error=error
+        )
 
         if hasattr(self, "_stream_queue"):
-            await self._stream_queue.put(result)
+            if self._shutdown or self._stop_event.is_set():
+                return
+            # Wait for put or stop_event to prevent deadlock during early exit / shutdown
+            put_task = asyncio.create_task(self._stream_queue.put(result))
+            stop_task = asyncio.create_task(self._stop_event.wait())
+            try:
+                await asyncio.wait({put_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                if not put_task.done():
+                    put_task.cancel()
+                if not stop_task.done():
+                    stop_task.cancel()
+        elif getattr(self, "_is_streaming", False):
+            # In streaming mode but stream queue is gone; do not leak to self._results
+            pass
         elif self.collect_results:
             self._results.append(result)
 
@@ -1104,7 +1122,7 @@ class Pipeline:
         self,
         items: Sequence[Any],
         progress: bool = False,
-        buffer_size: int = 0,
+        buffer_size: Optional[int] = None,
     ) -> AsyncIterator[PipelineResult]:
         """
         Stream results as they complete.
@@ -1116,6 +1134,8 @@ class Pipeline:
         Args:
             items: Items to process through the pipeline
             progress: Show minimal progress bar
+            buffer_size: Size of the internal buffer. 0 means no buffering (rendezvous),
+                         None (default) means unlimited buffering.
 
         Yields:
             PipelineResult objects as they complete
@@ -1138,7 +1158,12 @@ class Pipeline:
             - After streaming completes, `_results` remains empty (preserves original
               `collect_results` setting)
         """
-        result_queue: asyncio.Queue[Optional[PipelineResult]] = asyncio.Queue(maxsize=buffer_size)
+        self._is_streaming = True
+        if buffer_size == 0:
+            result_queue = RendezvousChannel()
+        else:
+            maxsize = 0 if buffer_size is None else buffer_size
+            result_queue = asyncio.Queue(maxsize=maxsize)
         self._stream_queue = result_queue
 
         display = None
@@ -1159,7 +1184,7 @@ class Pipeline:
             while items_yielded < total_items:
                 result = await result_queue.get()
 
-                if result is None:
+                if result is None or result is _PULL_CLOSED:
                     break
 
                 yield result
@@ -1194,6 +1219,17 @@ class Pipeline:
         logger.debug("Shutting down pipeline")
         self._shutdown = True
         self._stop_event.set()
+
+        if hasattr(self, "_stream_queue"):
+            if isinstance(self._stream_queue, RendezvousChannel):
+                self._stream_queue.close()
+            else:
+                while not self._stream_queue.empty():
+                    try:
+                        self._stream_queue.get_nowait()
+                        self._stream_queue.task_done()
+                    except (asyncio.QueueEmpty, ValueError):
+                        break
 
         # Drain queues to prevent join() from hanging and stop workers from picking up new items
         for q in self._queues:
@@ -1551,8 +1587,36 @@ class Pipeline:
         self._record_worker_metric(name, item, failed=True)
 
         await self._emit_status(
-            item.item_id, stage.name, "failed", metadata={"error": str(original_error)}
+            item.item_id, stage.name, "failed", metadata={
+                "error": str(original_error),
+                "error_type": type(original_error).__name__
+            }
         )
+
+        if hasattr(self, "_stream_queue"):
+            meta = {
+                k: v
+                for k, v in item.payload.items()
+                if k not in ("id", "value", "_sequence_id")
+            }
+            res = PipelineResult(
+                id=item.payload["id"],
+                value=item.payload["value"],
+                sequence_id=item.payload["_sequence_id"],
+                metadata=meta,
+                error=original_error,
+            )
+            if not (self._shutdown or self._stop_event.is_set()):
+                put_task = asyncio.create_task(self._stream_queue.put(res))
+                stop_task = asyncio.create_task(self._stop_event.wait())
+                try:
+                    await asyncio.wait({put_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    if not put_task.done():
+                        put_task.cancel()
+                    if not stop_task.done():
+                        stop_task.cancel()
+
         await self._run_stage_failure_callback(name, stage, item, original_error)
 
     async def _run_stage_failure_callback(
@@ -1606,7 +1670,7 @@ class Pipeline:
         current = value
 
         for idx, task in enumerate(stage.tasks):
-            task_name = task.__name__
+            task_name = get_task_name(task)
             self._worker_states[worker_name].current_task = task_name
             wrapped = self._wrap_with_tenacity(task, stage, worker_name, item_id, task_name)
 
@@ -1670,12 +1734,12 @@ class Pipeline:
             when completed=True.
         """
         current = value
-        _current_task_name = stage.tasks[0].__name__ if stage.tasks else "unknown"
+        _current_task_name = get_task_name(stage.tasks[0]) if stage.tasks else "unknown"
         _task_start = time.time()
 
         try:
             for idx, task in enumerate(stage.tasks):
-                task_name = task.__name__
+                task_name = get_task_name(task)
                 _current_task_name = task_name
                 _task_start = time.time()
                 self._worker_states[worker_name].current_task = task_name
@@ -1743,32 +1807,17 @@ class Pipeline:
                     item_id,
                     stage.name,
                     "retrying",
-                    metadata={"attempt": attempt + 1, "retry": True, "error": str(original_error)},
+                    metadata={
+                        "attempt": attempt + 1,
+                        "retry": True,
+                        "error": str(original_error),
+                        "error_type": type(original_error).__name__
+                    },
                 )
 
                 return False, None
             else:
-                logger.error(
-                    f"[{worker_name}] FAIL stage={stage.name} id={item_id} "
-                    f"after {attempt} attempts error={original_error}"
-                )
-
-                self._items_failed += 1
-
-                await self._emit_status(
-                    item_id, stage.name, "failed", metadata={"error": str(original_error)}
-                )
-
-                if stage.on_failure:
-                    try:
-                        if asyncio.iscoroutinefunction(stage.on_failure):
-                            await stage.on_failure(item_id, original_error, payload)
-                        else:
-                            stage.on_failure(item_id, original_error, payload)
-                    except Exception as cb_err:
-                        logger.error(f"[{worker_name}] Error in on_failure callback: {cb_err}")
-
-                return False, None
+                raise e
 
     def _wrap_with_tenacity(
         self,
