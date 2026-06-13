@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-06-13
+
+### Fixed
+
+*   **`stream()` then `run()` returns empty results**: `_is_streaming` was set to `True` at the start of `stream()` but never reset to `False` in the `finally` block. Subsequent calls to `run()` on the same pipeline instance would silently drop all results because `_add_result` saw `_is_streaming=True` and skipped collecting them. Fixed by resetting `self._is_streaming = False` after `await self.shutdown()` in the `stream()` finally block.
+*   **`install_fast_loop()` imports inside function body**: `sys`, `asyncio`, and `importlib.import_module` were imported inside `install_fast_loop()`, violating the project's "no imports inside functions" rule and causing an `I001` lint error. Moved all three to module-level imports in `antflow/__init__.py`.
+*   **Lint errors in `antflow/__init__.py` and `tests/test_stream_regressions.py`**: Two `ruff` errors introduced in v0.8.4 — `I001` (unsorted import block in `__init__.py`) and `F401` / `E501` (unused `PipelineResult` import and overly long docstring line in `test_stream_regressions.py`) — are now corrected.
+
 ## [0.8.4] - 2026-06-12
 
 ### Added

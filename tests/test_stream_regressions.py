@@ -2,9 +2,10 @@
 
 import asyncio
 import functools
+
 import pytest
 
-from antflow import Pipeline, Stage, AsyncExecutor, PipelineResult
+from antflow import AsyncExecutor, Pipeline, Stage
 
 
 async def add_one(x: int) -> int:
@@ -95,6 +96,32 @@ class TestStreamRegressions:
         assert len(pipeline.results) == 0
 
     @pytest.mark.asyncio
+    async def test_run_after_stream_returns_results(self):
+        """run() called after stream() must return results normally.
+
+        Regression: _is_streaming was never reset to False, causing _add_result
+        to silently drop all results on subsequent run() calls.
+        """
+        pipeline = Pipeline(
+            stages=[Stage(name="Process", workers=2, tasks=[add_one])]
+        )
+
+        # First call: stream
+        stream_results = []
+        async for res in pipeline.stream([1, 2, 3]):
+            stream_results.append(res)
+        assert len(stream_results) == 3
+
+        # Second call: run — must NOT be affected by the previous stream()
+        run_results = await pipeline.run([10, 20, 30])
+        assert len(run_results) == 3, (
+            f"run() after stream() returned {len(run_results)} results (expected 3) — "
+            "_is_streaming was not reset"
+        )
+        assert sorted(r.value for r in run_results) == [11, 21, 31]
+
+
+    @pytest.mark.asyncio
     async def test_stream_buffer_size_zero_rendezvous(self):
         """buffer_size=0 should behave as a true rendezvous (zero-buffer) channel."""
         # We can verify it uses RendezvousChannel
@@ -135,7 +162,9 @@ class TestStreamRegressions:
 
     @pytest.mark.asyncio
     async def test_executor_submit_without_context_manager(self):
-        """AsyncExecutor.submit() should start workers and resolve futures without context manager."""
+        """AsyncExecutor.submit() should start workers and resolve futures
+        without needing an async with block.
+        """
         executor = AsyncExecutor(max_workers=2)
         try:
             future = executor.submit(add_one, 10)

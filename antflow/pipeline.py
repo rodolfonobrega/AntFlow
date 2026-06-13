@@ -1203,6 +1203,9 @@ class Pipeline:
 
             await self.shutdown()
 
+            # Reset streaming flag so subsequent run()/stream() calls work correctly
+            self._is_streaming = False
+
             if display:
                 display.on_finish([], self.get_error_summary())
 
