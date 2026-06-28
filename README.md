@@ -25,6 +25,10 @@ My batch processing went from hours to a fraction of the time.
   <img src="docs/images/antflow-workers.png" alt="AntFlow Workers" width="600">
 </p>
 
+<p align="center">
+  <img src="docs/images/antflow-demo.gif" alt="AntFlow Demo" width="700">
+</p>
+
 ---
 
 ## Install
