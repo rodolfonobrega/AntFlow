@@ -59,6 +59,7 @@ nav:
       - Dashboard: user-guide/dashboard.md
       - Worker Tracking: user-guide/worker-tracking.md
       - Error Handling: user-guide/error-handling.md
+      - Telemetry (OpenTelemetry): user-guide/telemetry.md
   - API Reference:
       - Overview: api/index.md
       - Executor: api/executor.md

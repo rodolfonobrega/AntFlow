@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-28
+
+### Added
+
+*   **OpenTelemetry instrumentation (`antflow[opentelemetry]`):** Opt-in tracing and metrics via `opentelemetry-api`. Zero overhead when not installed — all instrumentation falls through to no-op stubs.
+    *   **Traces:** `antflow.pipeline.run` (pipeline span), `antflow.stage.<name>` (per-stage span), `antflow.task.<name>` (per-task span), `antflow.executor.task` (executor span). All spans record exceptions and set `ERROR` status on failure.
+    *   **Metrics:** `antflow.pipeline.items.processed` (counter), `antflow.pipeline.items.failed` (counter), `antflow.pipeline.items.retried` (counter), `antflow.task.duration` (histogram, seconds). All instruments are tagged with `stage` and `task` attributes.
+    *   **`configure_telemetry(enabled=True/False)`:** Toggle instrumentation at runtime without reinstalling the package.
+    *   **`telemetry_enabled() -> bool`:** Check whether OTel is active (`opentelemetry-api` installed and not disabled).
+    *   **`antflow/telemetry.py`:** Internal module with `get_tracer()`, `get_meter()`, and full no-op stub classes (`_NoOpTracer`, `_NoOpMeter`, `_NoOpSpan`, `_NoOpInstrument`) so the package never hard-imports OTel at the module level.
+    *   Install with: `pip install antflow[opentelemetry]`
+
 ## [0.8.5] - 2026-06-13
 
 ### Fixed

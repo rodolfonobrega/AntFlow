@@ -18,6 +18,7 @@ from .exceptions import (
 from .executor import AsyncExecutor, AsyncFuture, WaitStrategy
 from .pipeline import Pipeline, PipelineBuilder, Stage
 from .tracker import StatusEvent, StatusTracker
+from .telemetry import configure_telemetry, is_enabled as telemetry_enabled
 from .types import (
     DashboardProtocol,
     DashboardSnapshot,
@@ -82,4 +83,6 @@ __all__ = [
     "rate_limit",
     "set_task_status",
     "install_fast_loop",
+    "configure_telemetry",
+    "telemetry_enabled",
 ]

@@ -19,6 +19,7 @@ from typing import (
 
 from .exceptions import ExecutorShutdownError
 from .utils import setup_logger
+from .telemetry import get_tracer, is_enabled
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -129,16 +130,23 @@ class AsyncExecutor:
 
             future, fn, args, kwargs = item
 
-            try:
-                logger.debug(f"Worker {worker_id} executing task {future.sequence_id}")
-                result = await fn(*args, **kwargs)
-                future.set_result(result)
-                logger.debug(f"Worker {worker_id} completed task {future.sequence_id}")
-            except Exception as e:
-                logger.debug(f"Worker {worker_id} task {future.sequence_id} failed: {e}")
-                future.set_exception(e)
-            finally:
-                self._queue.task_done()
+            tracer = get_tracer()
+            with tracer.start_as_current_span("antflow.executor.task") as span:
+                if is_enabled():
+                    span.set_attribute("antflow.executor.worker_id", worker_id)
+                    span.set_attribute("antflow.executor.task_id", future.sequence_id)
+                try:
+                    logger.debug(f"Worker {worker_id} executing task {future.sequence_id}")
+                    result = await fn(*args, **kwargs)
+                    future.set_result(result)
+                    logger.debug(f"Worker {worker_id} completed task {future.sequence_id}")
+                except Exception as e:
+                    logger.debug(f"Worker {worker_id} task {future.sequence_id} failed: {e}")
+                    if is_enabled():
+                        span.record_exception(e)
+                    future.set_exception(e)
+                finally:
+                    self._queue.task_done()
 
         logger.debug(f"Worker {worker_id} stopped")
 

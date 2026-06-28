@@ -81,6 +81,13 @@ I built AntFlow to solve this exact problem. Instead of batch-by-batch processin
 - **Error Summary** - Aggregated error statistics with `get_error_summary()`
 - **StatusTracker** - Real-time item tracking with full history
 
+### 🔭 **OpenTelemetry Integration** (NEW)
+- **Optional Dependency** - Install via `pip install AntFlow[opentelemetry]`
+- **Automatic Tracing** - Auto-instruments pipeline runs, stages, and tasks
+- **Spans & Hierarchy** - Out-of-the-box parent/child spans trace entire pipelines
+- **Execution Metrics** - Standard instrumentation counters and task duration histograms
+- **Zero Overhead** - Transparent fallback to no-op stubs when not installed or disabled
+
 ### 🎯 **Familiar API**
 - Drop-in async replacement for `concurrent.futures`
 - `submit()`, `map()`, `as_completed()` methods

@@ -48,6 +48,7 @@ from .types import (
     WorkerState,
 )
 from .utils import extract_exception, get_task_name, setup_logger
+from .telemetry import get_tracer, get_meter, is_enabled, StatusCode
 
 logger = setup_logger(__name__)
 
@@ -503,6 +504,7 @@ class Pipeline:
         self._call_limiters: Dict[str, Any] = {}
         self._initialize_worker_tracking()
         self._initialize_semaphores()
+        self._initialize_telemetry()
 
     @property
     def results(self) -> List[PipelineResult]:
@@ -623,6 +625,27 @@ class Pipeline:
                 self._call_limiters[stage.name] = AsyncLimiter(
                     stage.call_rate, stage.call_rate_period
                 )
+
+    def _initialize_telemetry(self) -> None:
+        """Initialize OTel metrics instruments (no-op if OTel is disabled)."""
+        meter = get_meter()
+        self._otel_items_processed = meter.create_counter(
+            "antflow.pipeline.items.processed",
+            description="Total items successfully processed",
+        )
+        self._otel_items_failed = meter.create_counter(
+            "antflow.pipeline.items.failed",
+            description="Total items that failed processing",
+        )
+        self._otel_items_retried = meter.create_counter(
+            "antflow.pipeline.items.retried",
+            description="Total retry attempts",
+        )
+        self._otel_task_duration = meter.create_histogram(
+            "antflow.task.duration",
+            description="Task execution duration in seconds",
+            unit="s",
+        )
 
     def get_worker_states(self) -> Dict[str, WorkerState]:
         """
@@ -1015,30 +1038,41 @@ class Pipeline:
 
             For event-driven monitoring without polling, use `StatusTracker` callbacks instead.
         """
-        display = self._create_display(progress, dashboard, custom_dashboard)
+        tracer = get_tracer()
+        with tracer.start_as_current_span("antflow.pipeline.run") as span:
+            if is_enabled():
+                span.set_attribute("antflow.pipeline.total_items", len(items))
+                span.set_attribute("antflow.pipeline.stages", len(self.stages))
+                span.set_attribute("antflow.pipeline.stage_names", [s.name for s in self.stages])
 
-        if display:
-            display.on_start(self, len(items))
+            display = self._create_display(progress, dashboard, custom_dashboard)
 
-        await self.start()
-        await self.feed(items)
+            if display:
+                display.on_start(self, len(items))
 
-        if display:
-            monitor_task = asyncio.create_task(
-                self._monitor_progress(display, len(items), dashboard_update_interval)
-            )
-            await self.join()
-            monitor_task.cancel()
-            try:
-                await monitor_task
-            except asyncio.CancelledError:
-                pass
+            await self.start()
+            await self.feed(items)
 
-            display.on_finish(self.results, self.get_error_summary())
-        else:
-            await self.join()
+            if display:
+                monitor_task = asyncio.create_task(
+                    self._monitor_progress(display, len(items), dashboard_update_interval)
+                )
+                await self.join()
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass
 
-        return self.results
+                display.on_finish(self.results, self.get_error_summary())
+            else:
+                await self.join()
+
+            if is_enabled():
+                span.set_attribute("antflow.pipeline.items_processed", self._items_processed)
+                span.set_attribute("antflow.pipeline.items_failed", self._items_failed)
+
+            return self.results
 
     def _create_display(
         self,
@@ -1374,12 +1408,23 @@ class Pipeline:
             tokens = self._enter_stage_worker_context(name, stage, item)
 
             try:
-                if await self._process_stage_worker_item(
-                    name, stage_index, stage, output_q, item
-                ):
-                    self._record_stage_worker_success(name, output_q is None, stage, item)
-            except Exception as e:
-                await self._handle_stage_worker_failure(name, stage, item, e)
+                tracer = get_tracer()
+                with tracer.start_as_current_span(f"antflow.stage.{stage.name}") as span:
+                    if is_enabled():
+                        span.set_attribute("antflow.stage.name", stage.name)
+                        span.set_attribute("antflow.worker.name", name)
+                        span.set_attribute("antflow.item.id", str(item.item_id))
+                        span.set_attribute("antflow.item.attempt", item.attempt)
+                    try:
+                        if await self._process_stage_worker_item(
+                            name, stage_index, stage, output_q, item
+                        ):
+                            self._record_stage_worker_success(name, output_q is None, stage, item)
+                    except Exception as e:
+                        if is_enabled():
+                            span.record_exception(e)
+                            span.set_status(StatusCode.ERROR, str(e))
+                        await self._handle_stage_worker_failure(name, stage, item, e)
             finally:
                 self._exit_stage_worker_context(name, tokens)
                 input_q.task_done()
@@ -1577,6 +1622,7 @@ class Pipeline:
     ) -> None:
         if is_final_stage:
             self._items_processed += 1
+            self._otel_items_processed.add(1, {"stage": stage.name})
 
         logger.debug(f"[{name}] END stage={stage.name} id={item.item_id}")
         self._record_worker_metric(name, item, failed=False)
@@ -1587,6 +1633,7 @@ class Pipeline:
         original_error = extract_exception(error)
         logger.error(f"[{name}] FAIL stage={stage.name} id={item.item_id} error={original_error}")
         self._items_failed += 1
+        self._otel_items_failed.add(1, {"stage": stage.name})
         self._record_worker_metric(name, item, failed=True)
 
         await self._emit_status(
@@ -1757,23 +1804,41 @@ class Pipeline:
                     item_id, stage.name, task_name, worker_name, "start", attempt
                 )
 
-                if stage.unpack_args:
-                    if isinstance(current, dict):
-                        coro = task(**current)
-                    elif isinstance(current, (list, tuple)):
-                        coro = task(*current)
-                    else:
-                        coro = task(current)
-                else:
-                    coro = task(current)
+                tracer = get_tracer()
+                with tracer.start_as_current_span(f"antflow.task.{task_name}") as span:
+                    if is_enabled():
+                        span.set_attribute("antflow.task.name", task_name)
+                        span.set_attribute("antflow.task.attempt", attempt)
+                        span.set_attribute("antflow.worker.name", worker_name)
+                        span.set_attribute("antflow.stage.name", stage.name)
+                    try:
+                        if stage.unpack_args:
+                            if isinstance(current, dict):
+                                coro = task(**current)
+                            elif isinstance(current, (list, tuple)):
+                                coro = task(*current)
+                            else:
+                                coro = task(current)
+                        else:
+                            coro = task(current)
 
-                # Acquire semaphore if limit exists
-                semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
-                if semaphore:
-                    async with semaphore:
-                        current = await coro
-                else:
-                    current = await coro
+                        # Acquire semaphore if limit exists
+                        semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
+                        if semaphore:
+                            async with semaphore:
+                                current = await coro
+                        else:
+                            current = await coro
+
+                        duration = time.time() - task_start
+                        self._otel_task_duration.record(
+                            duration, {"stage": stage.name, "task": task_name}
+                        )
+                    except Exception as task_exc:
+                        if is_enabled():
+                            span.record_exception(task_exc)
+                            span.set_status(StatusCode.ERROR, str(task_exc))
+                        raise task_exc
 
                 await self._emit_task_event(
                     item_id, stage.name, task_name, worker_name, "complete", attempt,
@@ -1817,6 +1882,7 @@ class Pipeline:
                         "error_type": type(original_error).__name__
                     },
                 )
+                self._otel_items_retried.add(1, {"stage": stage.name})
 
                 return False, None
             else:
@@ -1862,36 +1928,25 @@ class Pipeline:
                 attempt=current_attempt,
             )
 
-            try:
-                # Acquire semaphore if limit exists
-                semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
-                if semaphore:
-                    async with semaphore:
+            tracer = get_tracer()
+            with tracer.start_as_current_span(f"antflow.task.{task_name}") as span:
+                if is_enabled():
+                    span.set_attribute("antflow.task.name", task_name)
+                    span.set_attribute("antflow.task.attempt", current_attempt)
+                    span.set_attribute("antflow.worker.name", worker_name)
+                    span.set_attribute("antflow.stage.name", stage.name)
+                try:
+                    # Acquire semaphore if limit exists
+                    semaphore = self._task_semaphores.get(stage.name, {}).get(task_name)
+                    if semaphore:
+                        async with semaphore:
+                            result = await task(*args, **kwargs)
+                    else:
                         result = await task(*args, **kwargs)
-                else:
-                    result = await task(*args, **kwargs)
 
-                duration = time.time() - start_time
-
-                await self._emit_task_event(
-                    item_id=item_id,
-                    stage=stage.name,
-                    task_name=task_name,
-                    worker=worker_name,
-                    event_type="complete",
-                    attempt=current_attempt,
-                    duration=duration,
-                )
-
-                return result
-
-            except Exception as e:
-                duration = time.time() - start_time
-
-                if current_attempt < stage.task_attempts:
-                    logger.debug(
-                        f"[{worker_name}] RETRY task={task_name} id={item_id} "
-                        f"attempt={current_attempt} error={e}"
+                    duration = time.time() - start_time
+                    self._otel_task_duration.record(
+                        duration, {"stage": stage.name, "task": task_name}
                     )
 
                     await self._emit_task_event(
@@ -1899,23 +1954,48 @@ class Pipeline:
                         stage=stage.name,
                         task_name=task_name,
                         worker=worker_name,
-                        event_type="retry",
+                        event_type="complete",
                         attempt=current_attempt,
-                        error=e,
-                        duration=duration,
-                    )
-                else:
-                    await self._emit_task_event(
-                        item_id=item_id,
-                        stage=stage.name,
-                        task_name=task_name,
-                        worker=worker_name,
-                        event_type="fail",
-                        attempt=current_attempt,
-                        error=e,
                         duration=duration,
                     )
 
-                raise
+                    return result
+
+                except Exception as e:
+                    duration = time.time() - start_time
+                    if is_enabled():
+                        span.record_exception(e)
+                        span.set_status(StatusCode.ERROR, str(e))
+
+                    if current_attempt < stage.task_attempts:
+                        logger.debug(
+                            f"[{worker_name}] RETRY task={task_name} id={item_id} "
+                            f"attempt={current_attempt} error={e}"
+                        )
+                        self._otel_items_retried.add(1, {"stage": stage.name})
+
+                        await self._emit_task_event(
+                            item_id=item_id,
+                            stage=stage.name,
+                            task_name=task_name,
+                            worker=worker_name,
+                            event_type="retry",
+                            attempt=current_attempt,
+                            error=e,
+                            duration=duration,
+                        )
+                    else:
+                        await self._emit_task_event(
+                            item_id=item_id,
+                            stage=stage.name,
+                            task_name=task_name,
+                            worker=worker_name,
+                            event_type="fail",
+                            attempt=current_attempt,
+                            error=e,
+                            duration=duration,
+                        )
+
+                    raise
 
         return wrapped
