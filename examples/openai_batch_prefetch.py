@@ -59,7 +59,7 @@ Pass async callables to ``upload_fn``, ``submit_fn``, ``poll_fn`` and
 import asyncio
 import random
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from antflow import Pipeline, Stage
 from antflow.context import concurrency_limit
@@ -139,10 +139,10 @@ class OpenAIBatchPipeline:
         max_in_flight: int = 50,
         poll_parallelism: int = 5,
         poll_interval: float = 1.0,
-        upload_fn: UploadFn | None = None,
-        submit_fn: SubmitFn | None = None,
-        poll_fn: PollFn | None = None,
-        download_fn: DownloadFn | None = None,
+        upload_fn: Optional[UploadFn] = None,
+        submit_fn: Optional[SubmitFn] = None,
+        poll_fn: Optional[PollFn] = None,
+        download_fn: Optional[DownloadFn] = None,
     ):
         self._upload_workers = upload_workers
         self._poll_parallelism = poll_parallelism
@@ -181,7 +181,7 @@ class OpenAIBatchPipeline:
 
     async def _upload_worker(self, worker_id: int, file_queue: asyncio.Queue) -> None:
         while True:
-            task: FileTask | None = await file_queue.get()
+            task: Optional[FileTask] = await file_queue.get()
             if task is None:
                 file_queue.task_done()
                 return
@@ -255,7 +255,7 @@ class OpenAIBatchPipeline:
         self._results = []
         total = len(files)
 
-        file_queue: asyncio.Queue[FileTask | None] = asyncio.Queue()
+        file_queue: asyncio.Queue[Optional[FileTask]] = asyncio.Queue()
         for f in files:
             await file_queue.put(f)
 
@@ -316,10 +316,10 @@ class PullBatchPipeline:
         max_in_flight: int = 50,
         poll_parallelism: int = 5,
         poll_interval: float = 1.0,
-        upload_fn: UploadFn | None = None,
-        submit_fn: SubmitFn | None = None,
-        poll_fn: PollFn | None = None,
-        download_fn: DownloadFn | None = None,
+        upload_fn: Optional[UploadFn] = None,
+        submit_fn: Optional[SubmitFn] = None,
+        poll_fn: Optional[PollFn] = None,
+        download_fn: Optional[DownloadFn] = None,
     ) -> None:
         self._poll_interval = poll_interval
         self._upload_fn = upload_fn or openai_upload
