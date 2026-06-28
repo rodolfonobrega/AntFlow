@@ -6,130 +6,46 @@
 
 ## Why AntFlow?
 
-The name 'AntFlow' is inspired by the efficiency of an ant colony, where each ant (worker) performs its specialized function, and together they contribute to the colony's collective goal. Similarly, AntFlow orchestrates independent workers to achieve complex asynchronous tasks seamlessly.
+I was processing massive amounts of data using OpenAI's Batch API. The workflow had four steps:
 
-### The Problem I Had to Solve
-
-I was processing massive amounts of data using OpenAI's Batch API. The workflow was complex:
-
-1. Upload batches of data to OpenAI
-2. Wait for processing to complete
-3. Download the results
+1. Upload batches to OpenAI
+2. Wait for processing
+3. Download results
 4. Save to database
-5. Repeat for the next batch
 
-Initially, I processed 10 batches at a time using basic async. But here's the problem: **I had to wait for ALL 10 batches to complete before starting the next group.**
+I was running 10 batches at a time with basic async. The problem: I had to wait for **all 10** to finish before starting the next group.
 
-### The Bottleneck
+In practice, 9 batches would finish in 5 minutes and one would take 30. That one slow batch blocked everything — 25 minutes of idle time, repeated across hundreds of batches.
 
-Imagine this scenario:
+AntFlow fixes this with a worker pool model: each worker picks up the next task as soon as it finishes, so slow tasks never block fast ones. Worker count, retry logic, and stage configuration stay in your hands.
 
-- 9 batches complete in 5 minutes
-- 1 batch gets stuck and takes 30 minutes
-- **I waste 25 minutes waiting for that one slow batch while my system sits idle**
-
-With hundreds of batches to process, these delays accumulated into **hours of wasted time**. Even worse, one failed batch would block the entire pipeline.
-
-### The Solution: AntFlow
-
-I built AntFlow to solve this exact problem. Instead of batch-by-batch processing, AntFlow uses worker pools where:
-
-- ✅ Each worker handles tasks independently
-- ✅ When a worker finishes, it immediately grabs the next task
-- ✅ Slow tasks don't block fast ones
-- ✅ Always maintain optimal concurrency (e.g., 10 tasks running simultaneously)
-- ✅ Built-in retry logic for failed tasks
-- ✅ Multi-stage pipelines for complex workflows
-
-**Result:** My OpenAI batch processing went from taking hours to completing in a fraction of the time, with automatic retry handling and zero idle time.
+My batch processing went from hours to a fraction of the time.
 
 <p align="center">
   <img src="docs/images/antflow-workers.png" alt="AntFlow Workers" width="600">
 </p>
 
-<p align="center">
-  <em>AntFlow: Modern async execution library with concurrent.futures-style API and advanced pipelines</em>
-</p>
-
 ---
 
-## Key Features
-
-### 🚀 **Worker Pool Architecture**
-- Independent workers that never block each other
-- Automatic task distribution
-- Optimal resource utilization
-
-### 🔄 **Multi-Stage Pipelines**
-- Chain operations with configurable worker pools per stage
-- Each stage runs independently
-- Data flows automatically between stages
-- **Priority Queues**: Assign priority to items to bypass sequential processing (NEW)
-- **Interactive Control**: Resume pipelines and inject items into any stage (NEW)
-
-### 💪 **Built-in Resilience**
-- Per-task retry with exponential backoff
-- Per-stage retry for transactional operations
-- Failed tasks don't stop the pipeline
-
-### 📊 **Real-time Monitoring & Dashboards**
-- **Built-in Progress Bar** - Simple `progress=True` flag for terminal progress
-- **Three Dashboard Levels** - Compact, Detailed, and Full dashboards
-- **Custom Dashboards** - Implement `DashboardProtocol` for your own UI
-- **Worker State Tracking** - Know what each worker is doing in real-time
-- **Performance Metrics** - Track items processed, failures, avg time per worker
-- **Error Summary** - Aggregated error statistics with `get_error_summary()`
-- **StatusTracker** - Real-time item tracking with full history
-
-### 🔭 **OpenTelemetry Integration** (NEW)
-- **Optional Dependency** - Install via `pip install AntFlow[opentelemetry]`
-- **Automatic Tracing** - Auto-instruments pipeline runs, stages, and tasks
-- **Spans & Hierarchy** - Out-of-the-box parent/child spans trace entire pipelines
-- **Execution Metrics** - Standard instrumentation counters and task duration histograms
-- **Zero Overhead** - Transparent fallback to no-op stubs when not installed or disabled
-
-### 🎯 **Familiar API**
-- Drop-in async replacement for `concurrent.futures`
-- `submit()`, `map()`, `as_completed()` methods
-- Clean, intuitive interface
-
-### ✨ **Fluent APIs** (NEW)
-- **`Pipeline.quick()`** - One-liner for simple pipelines
-- **`Pipeline.create()`** - Fluent builder pattern
-- **Result Streaming** - `pipeline.stream()` for processing results as they complete
-
----
-
-## Use Cases
-
-### ✅ **Perfect for:**
-- **Batch API Processing** - OpenAI, Anthropic, any batch API
-- **ETL Pipelines** - Extract, transform, load at scale
-- **Web Scraping** - Fetch, parse, store web data efficiently
-- **Data Processing** - Process large datasets with retry logic
-- **Microservices** - Chain async service calls with error handling
-
-### ⚡ **Real-world Impact:**
-- Process large batches without bottlenecks
-- Automatic retry for transient failures
-- Zero idle time = maximum throughput
-- Clear observability with metrics and callbacks
-
----
-
-## Quick Install
+## Install
 
 ```bash
 pip install AntFlow
+```
+
+OpenTelemetry support (optional):
+
+```bash
+pip install AntFlow[opentelemetry]
 ```
 
 ---
 
 ## Quick Start
 
-AntFlow offers **three equivalent ways** to create pipelines. Choose based on your needs:
+Three ways to create a pipeline — pick what fits:
 
-### Method 1: Fluent Builder API (Concise & Recommended)
+### Fluent builder
 
 ```python
 import asyncio
@@ -140,19 +56,17 @@ async def fetch(x):
     return f"data_{x}"
 
 async def main():
-    items = range(10)
     results = await (
         Pipeline.create()
         .add("Fetch", fetch, workers=5, retries=3)
-        .run(items, progress=True)
+        .run(range(10), progress=True)
     )
     print(f"Processed {len(results)} items")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-### Method 2: Stage Objects (Full Control)
+### Stage objects
 
 ```python
 import asyncio
@@ -163,17 +77,15 @@ async def process(x):
     return x * 2
 
 async def main():
-    items = range(10)
     stage = Stage(name="Process", workers=5, tasks=[process])
     pipeline = Pipeline(stages=[stage])
-    results = await pipeline.run(items, progress=True)
+    results = await pipeline.run(range(10), progress=True)
     print(f"Processed {len(results)} items")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-### Method 3: Quick One-Liner
+### One-liner
 
 ```python
 import asyncio
@@ -186,47 +98,30 @@ async def main():
     results = await Pipeline.quick(range(10), simple_task, workers=5, progress=True)
     print(f"Processed {len(results)} items")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-### Which Method to Choose?
-
-| Method | When to Use |
+| Method | When to use |
 |--------|-------------|
-| **Stage objects** | Fine-grained control, custom callbacks, task concurrency limits |
-| **Fluent API** | Clean multi-stage pipelines, quick prototyping |
-| **Pipeline.quick()** | Simple scripts, single-task processing |
+| Stage objects | Fine-grained control, custom callbacks, per-task concurrency limits |
+| Fluent builder | Multi-stage pipelines, quick prototyping |
+| `Pipeline.quick()` | Single-task scripts |
 
-All three methods produce the same result - they're just different ways to express the same thing.
+---
 
+## Dashboards
 
-### Built-in Progress & Dashboards
-
-All display options are **optional**. By default, pipelines run silently.
+Pipelines run silently by default. Pass `progress=True` for a progress bar, or `dashboard=` for more detail:
 
 ```python
-import asyncio
-from antflow import Pipeline
-
-async def task(x):
-    await asyncio.sleep(0.01)
-    return x * 2
-
-async def main():
-    items = range(50)
-    # Dashboard options: "compact", "detailed", "full"
-    results = await Pipeline.quick(items, task, workers=5, dashboard="detailed")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+results = await Pipeline.quick(items, task, workers=5, dashboard="detailed")
 ```
 
-> **Tip:** For multi-stage pipelines, use `dashboard="detailed"` to see progress per stage and identify bottlenecks.
+Options: `"compact"`, `"detailed"`, `"full"`. Use `"detailed"` on multi-stage pipelines to spot bottlenecks per stage.
 
-### Stream Results
+---
 
-Process results as they complete:
+## Streaming results
 
 ```python
 import asyncio
@@ -238,67 +133,18 @@ async def process(x):
 
 async def main():
     pipeline = Pipeline.create().add("Process", process, workers=5).build()
-    
+
     async for result in pipeline.stream(range(10)):
         print(f"Got: {result.value}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
 ---
 
-## Traditional API
+## AsyncExecutor
 
-For full control, use the traditional Stage and Pipeline API:
-
-```python
-import asyncio
-from antflow import Pipeline, Stage
-
-async def upload_batch(batch_data):
-    await asyncio.sleep(0.1)
-    return "batch_id"
-
-async def check_status(batch_id):
-    await asyncio.sleep(0.1)
-    return "result_url"
-
-async def download_results(result_url):
-    await asyncio.sleep(0.1)
-    return "processed_data"
-
-async def save_to_db(processed_data):
-    await asyncio.sleep(0.1)
-    return "saved"
-
-async def main():
-    # Build the pipeline with explicit stages
-    upload_stage = Stage(name="Upload", workers=10, tasks=[upload_batch])
-    check_stage = Stage(name="Check", workers=10, tasks=[check_status])
-    download_stage = Stage(name="Download", workers=10, tasks=[download_results])
-    save_stage = Stage(name="Save", workers=5, tasks=[save_to_db])
-
-    pipeline = Pipeline(stages=[upload_stage, check_stage, download_stage, save_stage])
-
-    # Process with progress bar
-    batches = ["batch1", "batch2", "batch3"]
-    results = await pipeline.run(batches, progress=True)
-    print(f"Results: {len(results)} items")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-**What happens**: Each stage has its own worker pool. Workers process tasks independently. As soon as a worker finishes, it picks the next task. No waiting. No idle time. Maximum throughput.
-
----
-
-## Core Concepts
-
-### AsyncExecutor: Simple Concurrent Execution
-
-For straightforward parallel processing, AsyncExecutor provides a `concurrent.futures`-style API:
+For simple parallel execution without pipelines:
 
 ```python
 import asyncio
@@ -310,17 +156,17 @@ async def process_item(x):
 
 async def main():
     async with AsyncExecutor(max_workers=10) as executor:
-        # Using map() - returns list directly (like list(executor.map(...)) in concurrent.futures)
-        # retries=3 means it will try up to 4 times total with exponential backoff
         results = await executor.map(process_item, range(100), retries=3)
         print(f"Processed {len(results)} items")
 
 asyncio.run(main())
 ```
 
-### Pipeline: Multi-Stage Processing
+`retries=3` means up to 4 total attempts with exponential backoff.
 
-For complex workflows with multiple steps, you can build a `Pipeline`:
+---
+
+## Multi-stage pipeline
 
 ```python
 import asyncio
@@ -339,133 +185,99 @@ async def save(x):
     return f"saved_{x}"
 
 async def main():
-    # Define stages with different worker counts
     fetch_stage = Stage(
         name="Fetch",
         workers=10,
         tasks=[fetch],
-        # Limit specific tasks to avoid rate limits
-        task_concurrency_limits={"fetch": 2}
+        task_concurrency_limits={"fetch": 2}  # avoid rate limits
     )
-    
     process_stage = Stage(name="Process", workers=5, tasks=[process])
     save_stage = Stage(name="Save", workers=3, tasks=[save])
 
-    # Build and run pipeline
     pipeline = Pipeline(stages=[fetch_stage, process_stage, save_stage])
     results = await pipeline.run(range(50), progress=True)
 
     print(f"Completed: {len(results)} items")
     print(f"Stats: {pipeline.get_stats()}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-**Why different worker counts?**
-- **Fetch**: I/O bound, use more workers (10)
-- **Process**: CPU bound, moderate workers (5)
-- **Save**: Rate-limited API, fewer workers (3)
+Worker counts follow the workload: more for I/O-bound stages, fewer where you're rate-limited.
 
 ---
 
-## Real-Time Monitoring with StatusTracker
+## StatusTracker
 
-Track every item as it flows through your pipeline with **StatusTracker**. Get real-time status updates, query current states, and access complete event history.
+Track every item as it moves through stages:
 
 ```python
 from antflow import Pipeline, Stage, StatusTracker
 import asyncio
 
-# Mock tasks
 async def fetch(x): return x
 async def process(x): return x * 2
 async def save(x): return x
 
-# 1. Define a callback for real-time updates
 async def log_event(event):
     print(f"Item {event.item_id}: {event.status} @ {event.stage}")
 
 tracker = StatusTracker(on_status_change=log_event)
 
-# Define stages
-stage1 = Stage(name="Fetch", workers=5, tasks=[fetch])
-stage2 = Stage(name="Process", workers=3, tasks=[process])
-stage3 = Stage(name="Save", workers=5, tasks=[save])
-
 pipeline = Pipeline(
-    stages=[stage1, stage2, stage3],
+    stages=[
+        Stage(name="Fetch", workers=5, tasks=[fetch]),
+        Stage(name="Process", workers=3, tasks=[process]),
+        Stage(name="Save", workers=5, tasks=[save]),
+    ],
     status_tracker=tracker
 )
 
-# 2. Run pipeline (logs will print in real-time)
 async def main():
-    items = range(50)
-    results = await pipeline.run(items)
+    await pipeline.run(range(50))
 
-    # 3. Get final statistics
     stats = tracker.get_stats()
-    print(f"Completed: {stats['completed']}")
-    print(f"Failed: {stats['failed']}")
+    print(f"Completed: {stats['completed']}, Failed: {stats['failed']}")
 
-    # Get full history for an item
     history = tracker.get_history(item_id=0)
 
 asyncio.run(main())
 ```
 
-See the [examples/](examples/) directory for more advanced usage, including **built-in dashboards** (`dashboard="compact"`, `"detailed"`, `"full"`) and a **Web Dashboard** example (`examples/web_dashboard/`).
+**Dashboard vs StatusTracker**: dashboards poll on an interval for visual output; StatusTracker fires async callbacks on each event. Use dashboards for interactive debugging, StatusTracker for logging to external systems.
 
-### Monitoring: Dashboard vs StatusTracker
+---
 
-AntFlow provides two complementary monitoring mechanisms:
+## Features
 
-- **Dashboard (Polling)**: Built-in visual monitoring with periodic updates. Perfect for interactive debugging and real-time progress visualization. See [Dashboard Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/dashboard/).
-
-- **StatusTracker (Event-driven)**: Async callbacks invoked immediately on events. Ideal for logging to external systems, integrating with monitoring tools, and complete event history. See [StatusTracker Guide](https://rodolfonobrega.github.io/AntFlow/api/tracker/).
-
-See [Monitoring Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/monitoring/) for a detailed comparison and examples of both mechanisms.
+- Worker pool per stage — workers never block each other
+- Per-task retry with exponential backoff
+- Per-stage retry for transactional operations
+- Priority queues — bypass sequential order when needed
+- Interactive control — resume pipelines, inject items mid-run
+- OpenTelemetry auto-instrumentation (optional)
+- `concurrent.futures`-style API (`submit`, `map`, `as_completed`)
 
 ---
 
 ## Documentation
 
-AntFlow has comprehensive documentation to help you get started and master advanced features:
+Full docs at [rodolfonobrega.github.io/AntFlow](https://rodolfonobrega.github.io/AntFlow/):
 
-### 🚀 Getting Started
-- [Quick Start Guide](https://rodolfonobrega.github.io/AntFlow/getting-started/quickstart/) - Get up and running in minutes
-- [Installation Guide](https://rodolfonobrega.github.io/AntFlow/getting-started/installation/) - Installation instructions
+- [Quick Start](https://rodolfonobrega.github.io/AntFlow/getting-started/quickstart/)
+- [AsyncExecutor](https://rodolfonobrega.github.io/AntFlow/user-guide/executor/)
+- [Pipeline](https://rodolfonobrega.github.io/AntFlow/user-guide/pipeline/)
+- [Monitoring](https://rodolfonobrega.github.io/AntFlow/user-guide/monitoring/)
+- [Error Handling](https://rodolfonobrega.github.io/AntFlow/user-guide/error-handling/)
+- [API Reference](https://rodolfonobrega.github.io/AntFlow/api/)
+- [Examples](https://rodolfonobrega.github.io/AntFlow/examples/)
 
-### 📚 User Guides
-- [AsyncExecutor Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/executor/) - Using the concurrent.futures-style API
-- [Concurrency Control](https://rodolfonobrega.github.io/AntFlow/user-guide/concurrency/) - Managing concurrency limits and semaphores
-- [Pipeline Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/pipeline/) - Building multi-stage workflows
-- [Monitoring Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/monitoring/) - Dashboard vs StatusTracker comparison
-- [Dashboard Guide](https://rodolfonobrega.github.io/AntFlow/user-guide/dashboard/) - Real-time monitoring and dashboards
-- [Error Handling](https://rodolfonobrega.github.io/AntFlow/user-guide/error-handling/) - Managing failures and retries
-- [Worker Tracking](https://rodolfonobrega.github.io/AntFlow/user-guide/worker-tracking/) - Monitoring individual workers
-
-### 💡 Examples
-- [Examples Index](https://rodolfonobrega.github.io/AntFlow/examples/) - **Start Here**: List of all 11+ example scripts
-- [Basic Examples](https://rodolfonobrega.github.io/AntFlow/examples/basic/) - Simple use cases to get started
-- [Advanced Examples](https://rodolfonobrega.github.io/AntFlow/examples/advanced/) - Complex workflows and patterns
-
-### 📖 API Reference
-- [API Index](https://rodolfonobrega.github.io/AntFlow/api/) - Complete API documentation
-- [AsyncExecutor](https://rodolfonobrega.github.io/AntFlow/api/executor/) - Executor API reference
-- [Pipeline](https://rodolfonobrega.github.io/AntFlow/api/pipeline/) - Pipeline API reference
-- [StatusTracker](https://rodolfonobrega.github.io/AntFlow/api/tracker/) - Status tracking and monitoring
-- [Exceptions](https://rodolfonobrega.github.io/AntFlow/api/exceptions/) - Exception types
-- [Types](https://rodolfonobrega.github.io/AntFlow/api/types/) - Type definitions
-- [Utils](https://rodolfonobrega.github.io/AntFlow/api/utils/) - Utility functions
-
-You can also build and serve the documentation locally using `mkdocs`:
+Local docs:
 
 ```bash
 pip install mkdocs-material
 mkdocs serve
 ```
-Then open your browser to `http://127.0.0.1:8000`.
 
 ---
 
@@ -474,21 +286,14 @@ Then open your browser to `http://127.0.0.1:8000`.
 - Python 3.9+
 - tenacity >= 8.0.0
 
-**Note**: For Python 3.9-3.10, the `taskgroup` backport is automatically installed.
+Python 3.9–3.10 installs the `taskgroup` backport automatically.
 
 ---
 
-## Running Tests
-
-To run the test suite, first install the development dependencies from the project root:
+## Tests
 
 ```bash
 pip install -e ".[dev]"
-```
-
-Then, you can run the tests using `pytest`:
-
-```bash
 pytest
 ```
 
@@ -496,16 +301,10 @@ pytest
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-<p align="center">
-  Made with ❤️ to solve real problems in production
-</p>
+MIT — see [LICENSE](LICENSE).
