@@ -468,6 +468,17 @@ class Pipeline:
         for stage in stages:
             stage.validate()
 
+        seen_names: set = set()
+        duplicates: set = set()
+        for stage in stages:
+            if stage.name in seen_names:
+                duplicates.add(stage.name)
+            seen_names.add(stage.name)
+        if duplicates:
+            raise StageValidationError(
+                f"Duplicate stage name(s): {sorted(duplicates)}. Stage names must be unique."
+            )
+
         self.stages = stages
         self.collect_results = collect_results
         self._status_tracker = status_tracker
@@ -1050,23 +1061,26 @@ class Pipeline:
             if display:
                 display.on_start(self, len(items))
 
-            await self.start()
-            await self.feed(items)
+            try:
+                await self.start()
+                await self.feed(items)
 
-            if display:
-                monitor_task = asyncio.create_task(
-                    self._monitor_progress(display, len(items), dashboard_update_interval)
-                )
-                await self.join()
-                monitor_task.cancel()
-                try:
-                    await monitor_task
-                except asyncio.CancelledError:
-                    pass
+                if display:
+                    monitor_task = asyncio.create_task(
+                        self._monitor_progress(display, len(items), dashboard_update_interval)
+                    )
+                    await self.join()
+                    monitor_task.cancel()
+                    try:
+                        await monitor_task
+                    except asyncio.CancelledError:
+                        pass
 
-                display.on_finish(self.results, self.get_error_summary())
-            else:
-                await self.join()
+                    display.on_finish(self.results, self.get_error_summary())
+                else:
+                    await self.join()
+            finally:
+                await self.shutdown()
 
             if is_enabled():
                 span.set_attribute("antflow.pipeline.items_processed", self._items_processed)
@@ -1288,6 +1302,18 @@ class Pipeline:
                         break
                 if dropped:
                     logger.warning(f"Shutdown: discarded {dropped} unprocessed item(s) from queue")
+
+        for rq in self._retry_queues.values():
+            dropped = 0
+            while not rq.empty():
+                try:
+                    rq.get_nowait()
+                    rq.task_done()
+                    dropped += 1
+                except (asyncio.QueueEmpty, ValueError):
+                    break
+            if dropped:
+                logger.warning(f"Shutdown: discarded {dropped} unprocessed retry item(s)")
 
         if self._runner_task:
             # If we want to force cancel, we would cancel the runner task.
@@ -1637,7 +1663,7 @@ class Pipeline:
         self._record_worker_metric(name, item, failed=True)
 
         await self._emit_status(
-            item.item_id, stage.name, "failed", metadata={
+            item.item_id, stage.name, "failed", worker=name, metadata={
                 "error": str(original_error),
                 "error_type": type(original_error).__name__
             }
@@ -1854,15 +1880,16 @@ class Pipeline:
 
         except Exception as e:
             original_error = extract_exception(e)
-            await self._emit_task_event(
-                item_id, stage.name, _current_task_name, worker_name, "fail", attempt,
-                error=original_error, duration=time.time() - _task_start,
-            )
 
             if attempt < stage.stage_attempts:
                 logger.debug(
                     f"[{worker_name}] RETRY stage={stage.name} id={item_id} "
                     f"attempt={attempt} error={original_error}"
+                )
+
+                await self._emit_task_event(
+                    item_id, stage.name, _current_task_name, worker_name, "retry", attempt,
+                    error=original_error, duration=time.time() - _task_start,
                 )
 
                 # Re-queue with same priority (or could boost it here)
@@ -1875,6 +1902,7 @@ class Pipeline:
                     item_id,
                     stage.name,
                     "retrying",
+                    worker=worker_name,
                     metadata={
                         "attempt": attempt + 1,
                         "retry": True,
@@ -1886,6 +1914,10 @@ class Pipeline:
 
                 return False, None
             else:
+                await self._emit_task_event(
+                    item_id, stage.name, _current_task_name, worker_name, "fail", attempt,
+                    error=original_error, duration=time.time() - _task_start,
+                )
                 raise e
 
     def _wrap_with_tenacity(

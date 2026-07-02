@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, List, Optional
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -231,7 +232,7 @@ class FullDashboard(BaseDashboard):
 
                     if status == "failed":
                         style = "red"
-                        info = str(status_event.metadata.get("error", ""))[:30]
+                        info = escape(str(status_event.metadata.get("error", "")))[:30]
                     elif status == "completed":
                         style = "green"
                     elif status == "in_progress":

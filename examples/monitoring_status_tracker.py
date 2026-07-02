@@ -10,8 +10,14 @@ This example combines item-level and task-level monitoring in a single pipeline.
 """
 
 import asyncio
+import sys
 
 from antflow import Pipeline, Stage, StatusEvent, StatusTracker, TaskEvent
+
+if sys.version_info >= (3, 11):
+    from asyncio import TaskGroup
+else:
+    from taskgroup import TaskGroup
 
 
 async def fetch_data(x: int) -> dict:
@@ -144,7 +150,7 @@ async def main():
     items = list(range(20))
     print(f"Processing {len(items)} items through 4-task pipeline...\n")
 
-    async with asyncio.TaskGroup() as tg:
+    async with TaskGroup() as tg:
         tg.create_task(monitor_loop(tracker))
         await pipeline.run(items)
 

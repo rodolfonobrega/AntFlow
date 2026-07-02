@@ -98,5 +98,5 @@ class BaseDashboard(ABC):
         stage_stats = snapshot.pipeline_stats.stage_stats
         num_stages = len(stage_stats) or 1
         total_units = max(total_items * num_stages, 1)
-        done_units = sum(s.completed_items for s in stage_stats.values())
+        done_units = sum(s.completed_items + s.failed_items for s in stage_stats.values())
         return done_units, total_units

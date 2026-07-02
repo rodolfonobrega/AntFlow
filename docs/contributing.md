@@ -6,7 +6,7 @@ Thank you for your interest in contributing to AntFlow! This document provides g
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.9 or higher
 - pip
 
 ### Installation
@@ -74,7 +74,7 @@ ruff format antflow/
 Test examples to ensure they work:
 ```bash
 python examples/basic_executor.py
-python examples/basic_pipeline.py
+python examples/basic_example.py
 python examples/advanced_pipeline.py
 python examples/real_world_example.py
 ```
@@ -241,8 +241,8 @@ async def test_executor_handles_task_failure():
 
 ### Types of Documentation
 
-1. **API Documentation**: `docs/api_reference.md`
-2. **User Guides**: `docs/executor.md`, `docs/pipeline.md`
+1. **API Documentation**: `docs/api/*.md`
+2. **User Guides**: `docs/user-guide/executor.md`, `docs/user-guide/pipeline.md`
 3. **Examples**: `examples/` directory
 4. **README**: High-level overview and quick start
 

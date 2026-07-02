@@ -140,7 +140,7 @@ class AsyncExecutor:
                     result = await fn(*args, **kwargs)
                     future.set_result(result)
                     logger.debug(f"Worker {worker_id} completed task {future.sequence_id}")
-                except Exception as e:
+                except BaseException as e:
                     logger.debug(f"Worker {worker_id} task {future.sequence_id} failed: {e}")
                     if is_enabled():
                         span.record_exception(e)
@@ -201,7 +201,9 @@ class AsyncExecutor:
             from tenacity import retry, stop_after_attempt, wait_exponential
 
             @retry(
-                stop=stop_after_attempt(retries + 1), wait=wait_exponential(multiplier=retry_delay)
+                stop=stop_after_attempt(retries + 1),
+                wait=wait_exponential(multiplier=retry_delay),
+                reraise=True,
             )
             async def wrapped_fn(*a, **kw):
                 return await fn(*a, **kw)
@@ -346,10 +348,15 @@ class AsyncExecutor:
         # Create exactly one waiter task per future (not one per loop iteration),
         # and always cancel any leftovers in finally so nothing leaks.
         waiters = {asyncio.create_task(f._done_event.wait()): f for f in futures}
+        start_time = self._wait_start_time(timeout)
         try:
             while waiters:
+                remaining = self._remaining_wait_timeout(timeout, start_time)
+                if remaining is not None and remaining <= 0:
+                    raise asyncio.TimeoutError()
+
                 done, _ = await asyncio.wait(
-                    waiters.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=timeout
+                    waiters.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=remaining
                 )
 
                 if not done:
@@ -521,7 +528,7 @@ class AsyncExecutor:
 
         self._stop_event.set()
 
-        if self._workers_started:
+        if wait and self._workers_started:
             await asyncio.gather(*self._worker_tasks, return_exceptions=True)
 
         logger.debug("Executor shutdown complete")

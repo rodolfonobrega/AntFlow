@@ -9,10 +9,13 @@ AntFlow defines a clear exception hierarchy for different error scenarios:
 ```python
 AntFlowError                    # Base exception
 ├── ExecutorShutdownError         # Executor has been shut down
-├── PipelineError                 # Pipeline-specific errors
-│   └── StageValidationError      # Invalid stage configuration
-└── TaskFailedError               # Task execution failure
+└── PipelineError                 # Pipeline-specific errors
+    └── StageValidationError      # Invalid stage configuration
 ```
+
+Task failures are not wrapped — the original exception raised by the task
+propagates directly to the caller (see [In AsyncExecutor](#in-asyncexecutor)
+and [In Pipeline](#in-pipeline) below).
 
 ## Exception Types
 
@@ -78,22 +81,6 @@ try:
     stage.validate()
 except StageValidationError as e:
     print(f"Invalid stage: {e}")
-```
-
-### TaskFailedError
-
-Wrapper for task failures that preserves the original exception:
-
-```python
-from antflow import TaskFailedError
-
-# The original exception is available
-try:
-    # ... task execution
-    pass
-except TaskFailedError as e:
-    print(f"Task {e.task_name} failed")
-    print(f"Original error: {e.original_exception}")
 ```
 
 ## Handling Task Failures

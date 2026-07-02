@@ -1,7 +1,6 @@
 from unittest.mock import Mock
 
 import pytest
-from tenacity import RetryError
 
 from antflow import AsyncExecutor
 
@@ -33,7 +32,7 @@ class TestAsyncExecutorRetry:
         async with AsyncExecutor(max_workers=1) as executor:
             future = executor.submit(task, retries=2, retry_delay=0.01)
 
-            with pytest.raises(RetryError):
+            with pytest.raises(ValueError, match="Always failing"):
                 await future.result()
 
             assert mock_func.call_count == 3  # Initial + 2 retries
@@ -64,7 +63,7 @@ class TestAsyncExecutorRetry:
             raise ValueError("Always failing")
 
         async with AsyncExecutor(max_workers=2) as executor:
-            with pytest.raises(RetryError):
+            with pytest.raises(ValueError, match="Always failing"):
                 await executor.map(task, [0], retries=2, retry_delay=0.01)
 
     @pytest.mark.asyncio
@@ -95,6 +94,6 @@ class TestAsyncExecutorRetry:
             raise ValueError("Always failing")
 
         async with AsyncExecutor(max_workers=2) as executor:
-            with pytest.raises(RetryError):
+            with pytest.raises(ValueError, match="Always failing"):
                 async for _ in executor.map_iter(task, [0], retries=2, retry_delay=0.01):
                     pass

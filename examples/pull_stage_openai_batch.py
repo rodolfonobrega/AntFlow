@@ -41,6 +41,8 @@ Pass async callables to override the simulated OpenAI operations::
     )
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 from dataclasses import dataclass

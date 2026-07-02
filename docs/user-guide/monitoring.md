@@ -299,7 +299,7 @@ This gives you:
 
 See the [examples](../examples/) directory for complete working examples:
 
-- [monitoring_status_tracker.py](../examples/monitoring_status_tracker.py) - StatusTracker with callbacks
-- [dashboard_levels.py](../examples/dashboard_levels.py) - Using different dashboard levels
-- [custom_dashboard_callbacks.py](../examples/custom_dashboard_callbacks.py) - Custom dashboard with tracker
-- [monitoring_workers.py](../examples/monitoring_workers.py) - Worker-level monitoring
+- [monitoring_status_tracker.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/monitoring_status_tracker.py) - StatusTracker with callbacks
+- [dashboard_levels.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/dashboard_levels.py) - Using different dashboard levels
+- [custom_dashboard_callbacks.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/custom_dashboard_callbacks.py) - Custom dashboard with tracker
+- [monitoring_workers.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/monitoring_workers.py) - Worker-level monitoring

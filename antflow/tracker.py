@@ -4,6 +4,9 @@ from collections import defaultdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, get_args
 
 from .types import ErrorSummary, FailedItem, StatusEvent, StatusType, TaskEvent
+from .utils import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class StatusTracker:
@@ -73,7 +76,10 @@ class StatusTracker:
         self._current_status[event.item_id] = event
 
         if self.on_status_change:
-            await self.on_status_change(event)
+            try:
+                await self.on_status_change(event)
+            except Exception as e:
+                logger.error(f"Error in on_status_change callback: {e}")
 
     async def _emit_task_event(self, event: TaskEvent) -> None:
         """
@@ -168,7 +174,9 @@ class StatusTracker:
                 continue
 
             history = self._history.get(item_id, [])
-            attempts = sum(1 for e in history if e.status == "retrying") + 1
+            attempts = (
+                sum(1 for e in history if e.status == "retrying" and e.stage == event.stage) + 1
+            )
 
             error_str = str(event.metadata.get("error", "Unknown error"))
             error_type = event.metadata.get("error_type")

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-02
+
+### Fixed
+
+*   **Concurrency/robustness bugs (15 total) found in review**: `run()` leaked all workers on cancellation; executor workers died permanently on `BaseException` (e.g. `CancelledError`) from a task, hanging the caller; a raising `StatusTracker` callback aborted the whole pipeline; `shutdown()` dropped in-flight `per_stage` retry items silently; `submit(retries=N)` leaked `tenacity.RetryError` instead of the original exception; `shutdown(wait=False)` blocked anyway; `as_completed(timeout=...)` reset its deadline every iteration instead of being cumulative; `on_task_fail` fired on transient `per_stage` retries; Rich markup in error text could crash the `full` dashboard; `get_failed_items()` counted retry attempts across all stages instead of the failing stage; the progress bar never reached 100% when items failed; duplicate stage names silently corrupted pipeline state; the no-OpenTelemetry fallback broke `typing.get_type_hints()`; "failed"/"retrying" status events omitted `worker_id`; two example scripts used Python 3.10+ syntax without a 3.9-compatible fallback.
+*   **Documentation drift**: `docs/contributing.md` referenced a nonexistent Python version requirement, a nonexistent example file, and stale doc paths; `docs/user-guide/monitoring.md` linked to example files with paths that 404 on the built site; an anchor link in `docs/examples/index.md` didn't match the generated heading slug; four pages (`api/display.md`, `user-guide/custom-dashboard.md`, `user-guide/monitoring.md`, `user-guide/progress.md`) existed but weren't reachable from the docs nav; `TaskFailedError` was documented as catchable but never raised anywhere in the library — removed from docs and from the `.claude/skills/antflow.md` skill guide; the skill guide also had `rate_limit()` and `concurrency_limit()` swapped throughout its `call_concurrency` examples.
+*   **CI**: tests previously only ran inside the PyPI publish workflow, after the version bump/tag/release already happened, and only on Python 3.11. Added `.github/workflows/ci.yml` running the test suite on every push/PR across a 3.9–3.13 matrix. `docs.yml` now installs doc dependencies via the `[docs]` extra in `pyproject.toml` instead of separate `pip install` calls that could drift from declared versions.
+
 ## [0.9.0] - 2026-06-28
 
 ### Added

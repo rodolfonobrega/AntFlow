@@ -22,7 +22,7 @@ This directory contains a comprehensive list of example scripts available in the
 | **[task_limits_openai.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/task_limits_openai.py)** | **New**: Managing strict API rate limits using `task_concurrency_limits`. |
 | **[backpressure_demo.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/backpressure_demo.py)** | **New**: Demonstrating automatic backpressure and queue capacity limits. |
 | **[resume_checkpoint.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/resume_checkpoint.py)** | Manual checkpointing and resuming pipeline execution from a specific point. |
-| **[openai_batch_prefetch.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/openai_batch_prefetch.py)** | OpenAI Batch API pipeline with upload prefetch. Contains two implementations side-by-side: sweeper-based (`OpenAIBatchPipeline`) and pull-based (`PullBatchPipeline`). See [pipeline guide](../user-guide/pipeline.md#option-c-two-stages--pulltrue-upload-prefetch--exact-control-) for a detailed comparison. |
+| **[openai_batch_prefetch.py](https://github.com/rodolfonobrega/antflow/blob/main/examples/openai_batch_prefetch.py)** | OpenAI Batch API pipeline with upload prefetch. Contains two implementations side-by-side: sweeper-based (`OpenAIBatchPipeline`) and pull-based (`PullBatchPipeline`). See [pipeline guide](../user-guide/pipeline.md#option-c-two-stages-pulltrue-upload-prefetch-exact-control) for a detailed comparison. |
 
 ## Monitoring & Tracking
 

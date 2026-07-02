@@ -18,6 +18,9 @@ except ImportError:
         OK = 1
         ERROR = 2
 
+    Tracer = "_NoOpTracer"  # type: ignore[assignment,misc]
+    Meter = "_NoOpMeter"  # type: ignore[assignment,misc]
+
 
 # ---------- Public API ----------
 

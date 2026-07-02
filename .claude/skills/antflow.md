@@ -160,7 +160,7 @@ Stage(
     stage_attempts=3,                       # (per_stage only) full stage retries
     unpack_args=False,                      # unpack dict items as **kwargs
     task_concurrency_limits={"fn_name": 2}, # cap specific task concurrency (wraps ENTIRE function)
-    call_concurrency=5,                     # cap concurrent rate_limit() blocks WITHIN tasks
+    call_concurrency=5,                     # cap concurrent concurrency_limit() blocks WITHIN tasks
     on_success=async_fn,                    # callback(item_id, result, metadata)
     on_failure=async_fn,                    # callback(item_id, error, metadata)
     on_skip=async_fn,                       # callback(item_id, value, metadata) — fired when skip_if matches
@@ -203,14 +203,14 @@ Stage("job", workers=50, tasks=[upload, check],
 **Ask yourself:** why do I need more workers than the limit? If no other task in the
 stage benefits from the extra workers, just set `workers=N` and skip the limit entirely.
 
-**`call_concurrency`** — limits only the code inside `async with rate_limit():`. All workers stay alive; the slot is released immediately after the block. Use for **long-running tasks with internal loops** that make periodic API calls.
+**`call_concurrency`** — limits only the code inside `async with concurrency_limit():`. All workers stay alive; the slot is released immediately after the block. Use for **long-running tasks with internal loops** that make periodic API calls.
 
 ```python
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 async def poll_until_done(batch_id: str):
     while True:
-        async with rate_limit():           # acquire slot briefly
+        async with concurrency_limit():    # acquire slot briefly
             status = await api.check(batch_id)
         # slot released here — other workers can poll now
         if status == "done":
@@ -224,7 +224,7 @@ Stage("Poll", workers=500, tasks=[poll_until_done],
 
 **When to use what:**
 - `task_concurrency_limits`: multi-task stage where one short task has an external rate limit, but another task needs many workers (e.g., upload gate + long poll)
-- `call_concurrency` + `rate_limit()`: task has an internal loop and you want to limit API calls without blocking the whole worker
+- `call_concurrency` + `concurrency_limit()`: task has an internal loop and you want to limit API calls without blocking the whole worker
 - Combine both: fast gate limited by `task_concurrency_limits` + loop limited by `call_concurrency`
 - Single task, simple limit: just set `workers=N` — don't overcomplicate it
 
@@ -474,16 +474,16 @@ failed = [r for r in results if not r.is_success]
 
 ### N jobs processando, mas só K API calls ao mesmo tempo
 
-Use `call_concurrency` + `rate_limit()` when you want many workers alive (each monitoring their job) but only a few API calls happening simultaneously:
+Use `call_concurrency` + `concurrency_limit()` when you want many workers alive (each monitoring their job) but only a few API calls happening simultaneously:
 
 ```python
 from antflow import Pipeline, Stage
-from antflow.context import rate_limit
+from antflow.context import concurrency_limit
 
 async def poll_openai_batch(batch_id: str) -> list:
     client = AsyncOpenAI()
     while True:
-        async with rate_limit():  # ← only 5 concurrent API calls
+        async with concurrency_limit():  # ← only 5 concurrent API calls
             batch = await client.batches.retrieve(batch_id)
         set_task_status(f"status={batch.status}")
         if batch.status == "completed":
@@ -527,7 +527,6 @@ from antflow.exceptions import (
     ExecutorShutdownError,  # used executor after shutdown
     PipelineError,          # pipeline runtime error
     StageValidationError,   # bad stage config
-    TaskFailedError,        # wraps original exception
 )
 ```
 
@@ -546,7 +545,8 @@ from antflow import (
     StatusTracker,      # event-driven monitoring
     WaitStrategy,       # FIRST_COMPLETED | FIRST_EXCEPTION | ALL_COMPLETED
     set_task_status,    # update dashboard label from inside a task
-    rate_limit,         # async context manager for call_concurrency throttling
+    concurrency_limit,  # async context manager for call_concurrency throttling
+    rate_limit,         # async context manager for call_rate throttling
 
     # Result / stats dataclasses
     PipelineResult,     # .value, .error, .id, .is_success, .sequence_id, .metadata

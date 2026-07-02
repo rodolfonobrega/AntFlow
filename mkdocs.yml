@@ -57,6 +57,9 @@ nav:
       - Concurrency Control: user-guide/concurrency.md
       - Pipeline: user-guide/pipeline.md
       - Dashboard: user-guide/dashboard.md
+      - Custom Dashboard: user-guide/custom-dashboard.md
+      - Monitoring: user-guide/monitoring.md
+      - Progress: user-guide/progress.md
       - Worker Tracking: user-guide/worker-tracking.md
       - Error Handling: user-guide/error-handling.md
       - Telemetry (OpenTelemetry): user-guide/telemetry.md
@@ -65,6 +68,7 @@ nav:
       - Executor: api/executor.md
       - Pipeline: api/pipeline.md
       - StatusTracker: api/tracker.md
+      - Display: api/display.md
       - Types: api/types.md
       - Exceptions: api/exceptions.md
       - Utilities: api/utils.md
